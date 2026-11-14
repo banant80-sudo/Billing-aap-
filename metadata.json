@@ -1,0 +1,6 @@
+{
+  "name": "Finboss ERP",
+  "description": "Finboss Billing No.1 ERP - Modular Billing, Invoicing & Business Operations Dashboard",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

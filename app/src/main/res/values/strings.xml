@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">Finboss ERP</string>
+    <string name="brand_full_title">Finboss Billing No.1 ERP</string>
+    <string name="erp_edition_badge">MODULAR CLOUD ERP</string>
+    <string name="auth_hero_subtitle">Smart billing, GST compliance, and real-time enterprise control built module by module.</string>
+    <string name="auth_card_title">Workspace Sign-In</string>
+    <string name="auth_card_subtitle">Authenticate with Google to unlock your cloud ERP dashboard</string>
+    <string name="auth_feature_dashboard_title">Executive Dashboard Overview</string>
+    <string name="auth_feature_dashboard_desc">Monitor live revenue, receivables, expenses &amp; monthly targets</string>
+    <string name="auth_feature_cloud_title">Isolated Cloud Sync</string>
+    <string name="auth_feature_cloud_desc">Your business ledger and modular roadmap stay backed up per account</string>
+    <string name="auth_feature_security_title">Zero-Trust Access Control</string>
+    <string name="auth_feature_security_desc">Secured by Google Identity &amp; strict user-owned cloud rules</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="auth_checking_session">Checking session…</string>
+    <string name="auth_signing_in">Signing in…</string>
+    <string name="auth_footer_note">Sign in with your Google account to initialize your Finboss ERP business profile.</string>
+    <string name="cd_auth_hero_banner">Finboss ERP ledger and analytics banner</string>
+    <string name="cd_business_emblem">Business workspace emblem</string>
+    <string name="cd_user_avatar">Signed in user profile picture</string>
+    <string name="nav_overview">Overview</string>
+    <string name="nav_modules">Modules</string>
+    <string name="nav_workspace">Workspace</string>
+    <string name="action_quick_entry">Quick Entry</string>
+    <string name="action_edit_profile">Edit Business</string>
+    <string name="action_sign_out">Sign Out</string>
+    <string name="sync_status_online_synced">Online • Synced</string>
+    <string name="sync_status_syncing">Syncing to Cloud…</string>
+    <string name="sync_status_offline_cached">Offline • Local Cache</string>
+    <string name="sync_status_offline_pending">Offline • %1$d Pending</string>
+    <string name="action_sync_now">Sync Now</string>
+    <string name="action_export_backup">Export Offline Backup (.json)</string>
+    <string name="action_restore_backup">Restore from Backup (.json)</string>
+    <string name="backup_section_title">Online Sync &amp; Offline Backup</string>
+</resources>

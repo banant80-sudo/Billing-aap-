@@ -1,0 +1,821 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidPhoneId(phone) {
+      return phone is string && phone.size() >= 8 && phone.size() <= 20 && phone.matches('^\\+[1-9][0-9]{7,14}$');
+    }
+
+    function isValidSeatId(seatId) {
+      return seatId in ['seat_1', 'seat_2', 'seat_3', 'seat_4', 'seat_5'];
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasVerifiedPhoneToken() {
+      return isSignedIn() &&
+             ('phone_number' in request.auth.token) &&
+             isValidPhoneId(request.auth.token.phone_number);
+    }
+
+    function phoneAccessPath() {
+      return /databases/$(database)/documents/phone_access/$(request.auth.token.phone_number);
+    }
+
+    function isActiveSalesmanFor(userId) {
+      return hasVerifiedPhoneToken() &&
+             exists(phoneAccessPath()) &&
+             get(phoneAccessPath()).data.ownerUid == userId &&
+             get(phoneAccessPath()).data.isActive == true;
+    }
+
+    function hasSalesmanPermission(userId, permKey) {
+      return isActiveSalesmanFor(userId) &&
+             get(phoneAccessPath()).data.permissions[permKey] == true;
+    }
+
+    function salesmanPerms() {
+      return get(phoneAccessPath()).data.permissions;
+    }
+
+    function isProfileAllowedForSalesman(data) {
+      return !('businessProfileId' in data) ||
+             data.businessProfileId == null ||
+             data.businessProfileId == '' ||
+             data.businessProfileId in get(phoneAccessPath()).data.allowedProfiles;
+    }
+
+    function isExistingDocProfileAllowed(userId) {
+      return isOwner(userId) ||
+             !('businessProfileId' in existing()) ||
+             existing().businessProfileId == null ||
+             existing().businessProfileId == '' ||
+             existing().businessProfileId in get(phoneAccessPath()).data.allowedProfiles;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isValidSalesmanPermissionsMap(perms) {
+      return perms is map &&
+             perms.keys().hasAll([
+               'canViewOverview', 'canAddQuickEntry',
+               'canViewBilling', 'canCreateInvoices', 'canEditDeleteInvoices', 'canPrintInvoices',
+               'canViewStock', 'canManageStock',
+               'canViewParties', 'canManageParties',
+               'canViewExpenses', 'canManageExpenses',
+               'canViewReports'
+             ]) &&
+             perms.keys().hasOnly([
+               'canViewOverview', 'canAddQuickEntry',
+               'canViewBilling', 'canCreateInvoices', 'canEditDeleteInvoices', 'canPrintInvoices',
+               'canViewStock', 'canManageStock',
+               'canViewParties', 'canManageParties',
+               'canViewExpenses', 'canManageExpenses',
+               'canViewReports'
+             ]) &&
+             perms.canViewOverview is bool &&
+             perms.canAddQuickEntry is bool &&
+             perms.canViewBilling is bool &&
+             perms.canCreateInvoices is bool &&
+             perms.canEditDeleteInvoices is bool &&
+             perms.canPrintInvoices is bool &&
+             perms.canViewStock is bool &&
+             perms.canManageStock is bool &&
+             perms.canViewParties is bool &&
+             perms.canManageParties is bool &&
+             perms.canViewExpenses is bool &&
+             perms.canManageExpenses is bool &&
+             perms.canViewReports is bool;
+    }
+
+    function isValidAllowedProfiles(list) {
+      return list is list &&
+             list.size() >= 1 &&
+             list.size() <= 3 &&
+             list.hasOnly(['main_1', 'main_2', 'plain_1']);
+    }
+
+    function isValidSalesmanSeat(data, seatId) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidSeatId(seatId) &&
+             data.seatId == seatId &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             isValidPhoneId(data.phoneNumber) &&
+             data.roleLabel is string && data.roleLabel.size() >= 1 && data.roleLabel.size() <= 40 &&
+             data.isActive is bool &&
+             isValidAllowedProfiles(data.allowedProfiles) &&
+             isValidSalesmanPermissionsMap(data.permissions) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPhoneAccessGrant(data, phoneId) {
+      return data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             isValidSeatId(data.seatId) &&
+             isValidPhoneId(phoneId) &&
+             data.phoneNumber == phoneId &&
+             data.salesmanName is string && data.salesmanName.size() >= 1 && data.salesmanName.size() <= 60 &&
+             data.roleLabel is string && data.roleLabel.size() >= 1 && data.roleLabel.size() <= 40 &&
+             data.isActive is bool &&
+             isValidAllowedProfiles(data.allowedProfiles) &&
+             isValidSalesmanPermissionsMap(data.permissions) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBusinessProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
+             (!('ownerEmail' in data) || data.ownerEmail == null || (data.ownerEmail is string && data.ownerEmail.size() <= 150)) &&
+             data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 100 &&
+             (!('gstin' in data) || data.gstin == null || (data.gstin is string && data.gstin.size() <= 30)) &&
+             (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 200)) &&
+             (!('state' in data) || data.state == null || (data.state is string && data.state.size() <= 60)) &&
+             (!('pincode' in data) || data.pincode == null || (data.pincode is string && data.pincode.size() <= 12)) &&
+             data.currencySymbol is string && data.currencySymbol.size() >= 1 && data.currencySymbol.size() <= 5 &&
+             data.fiscalYearLabel is string && data.fiscalYearLabel.size() >= 2 && data.fiscalYearLabel.size() <= 20 &&
+             data.businessType is string && data.businessType.size() >= 1 && data.businessType.size() <= 40 &&
+             data.monthlySalesTarget is number && data.monthlySalesTarget >= 0 && data.monthlySalesTarget <= 1000000000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidProfileSlot(data, profileId) {
+      return isValidBusinessProfile(data) &&
+             profileId in ['main_1', 'main_2', 'plain_1'] &&
+             data.profileMode in ['main_gst', 'plain_non_gst'] &&
+             (
+               (profileId in ['main_1', 'main_2'] && data.profileMode == 'main_gst') ||
+               (
+                 profileId == 'plain_1' &&
+                 data.profileMode == 'plain_non_gst' &&
+                 (!('gstin' in data) || data.gstin == null || data.gstin == '')
+               )
+             );
+    }
+
+    function isValidOptionalProfileRef(data) {
+      return !('businessProfileId' in data) ||
+             (data.businessProfileId is string && data.businessProfileId in ['', 'main_1', 'main_2', 'plain_1']);
+    }
+
+    function isValidErpModule(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.code is string && data.code.size() >= 1 && data.code.size() <= 30 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 60 &&
+             data.subtitle is string && data.subtitle.size() <= 140 &&
+             data.status in ['active', 'queued', 'planned'] &&
+             data.isPinned is bool &&
+             data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 1000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidDashboardEntry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidOptionalProfileRef(data) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.partyName is string && data.partyName.size() <= 100 &&
+             data.category in ['sale', 'expense', 'receivable'] &&
+             data.amount is number && data.amount > 0 && data.amount <= 1000000000 &&
+             data.status in ['paid', 'pending'] &&
+             data.referenceCode is string && data.referenceCode.size() <= 30 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidErpParty(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidOptionalProfileRef(data) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             data.partyType in ['customer', 'supplier'] &&
+             data.phone is string && data.phone.size() <= 25 &&
+             data.gstin is string && data.gstin.size() <= 30 &&
+             (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 200)) &&
+             (!('state' in data) || data.state == null || (data.state is string && data.state.size() <= 60)) &&
+             (!('pincode' in data) || data.pincode == null || (data.pincode is string && data.pincode.size() <= 12)) &&
+             data.openingDue is number && data.openingDue >= 0 && data.openingDue <= 1000000000 &&
+             data.totalBilled is number && data.totalBilled >= 0 && data.totalBilled <= 1000000000 &&
+             data.totalPaid is number && data.totalPaid >= 0 && data.totalPaid <= 1000000000 &&
+             data.creditLimit is number && data.creditLimit >= 0 && data.creditLimit <= 1000000000 &&
+             data.notes is string && data.notes.size() <= 200 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidInventoryItem(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidOptionalProfileRef(data) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             data.sku is string && data.sku.size() >= 1 && data.sku.size() <= 40 &&
+             (!('hsnCode' in data) || data.hsnCode == null || (data.hsnCode is string && data.hsnCode.size() <= 16)) &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+             data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 15 &&
+             data.salePrice is number && data.salePrice >= 0 && data.salePrice <= 1000000000 &&
+             data.purchasePrice is number && data.purchasePrice >= 0 && data.purchasePrice <= 1000000000 &&
+             data.gstRatePercent is number && data.gstRatePercent >= 0 && data.gstRatePercent <= 28 &&
+             data.stockQty is number && data.stockQty >= 0 && data.stockQty <= 1000000000 &&
+             data.lowStockThreshold is number && data.lowStockThreshold >= 0 && data.lowStockThreshold <= 1000000000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidGstInvoice(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidOptionalProfileRef(data) &&
+             data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40 &&
+             data.partyId is string && data.partyId.size() <= 128 &&
+             data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 100 &&
+             data.partyGstin is string && data.partyGstin.size() <= 30 &&
+             (!('partyAddress' in data) || data.partyAddress == null || (data.partyAddress is string && data.partyAddress.size() <= 200)) &&
+             (!('partyState' in data) || data.partyState == null || (data.partyState is string && data.partyState.size() <= 60)) &&
+             (!('partyPincode' in data) || data.partyPincode == null || (data.partyPincode is string && data.partyPincode.size() <= 12)) &&
+             data.invoiceType in ['tax_invoice', 'pos_bill'] &&
+             data.taxMode in ['cgst_sgst', 'igst', 'none'] &&
+             data.paymentMethod in ['cash', 'upi', 'card', 'credit'] &&
+             data.status in ['paid', 'partial', 'unpaid'] &&
+             data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 1000000000 &&
+             data.gstTotal is number && data.gstTotal >= 0 && data.gstTotal <= 1000000000 &&
+             data.discountAmount is number && data.discountAmount >= 0 && data.discountAmount <= 1000000000 &&
+             data.grandTotal is number && data.grandTotal > 0 && data.grandTotal <= 1000000000 &&
+             data.paidAmount is number && data.paidAmount >= 0 && data.paidAmount <= data.grandTotal &&
+             data.notes is string && data.notes.size() <= 240 &&
+             data.lineItems is list && data.lineItems.size() >= 1 && data.lineItems.size() <= 25 &&
+             data.lineItems[0] is map &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidErpExpense(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             isValidOptionalProfileRef(data) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.category in ['rent', 'payroll', 'utilities', 'purchases', 'transport', 'marketing', 'tax', 'other'] &&
+             data.paymentMethod in ['cash', 'upi', 'bank', 'card'] &&
+             data.status in ['settled', 'pending'] &&
+             data.partyId is string && data.partyId.size() <= 128 &&
+             data.partyName is string && data.partyName.size() <= 100 &&
+             data.referenceNo is string && data.referenceNo.size() <= 40 &&
+             data.amount is number && data.amount > 0 && data.amount <= 1000000000 &&
+             data.gstInputAmount is number && data.gstInputAmount >= 0 && data.gstInputAmount <= data.amount &&
+             data.notes is string && data.notes.size() <= 240 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // Verified E.164 phone-keyed salesman access lookup (no listing allowed; read only by matching phone or owner)
+    match /phone_access/{phoneId} {
+      allow get: if isSignedIn() &&
+                    isValidPhoneId(phoneId) &&
+                    (
+                      (hasVerifiedPhoneToken() && request.auth.token.phone_number == phoneId) ||
+                      (resource != null && resource.data.ownerUid == request.auth.uid)
+                    );
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidPhoneId(phoneId) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'ownerUid', 'seatId', 'phoneNumber', 'salesmanName', 'roleLabel',
+                         'isActive', 'allowedProfiles', 'permissions', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'ownerUid', 'seatId', 'phoneNumber', 'salesmanName', 'roleLabel',
+                         'isActive', 'allowedProfiles', 'permissions', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidPhoneAccessGrant(incoming(), phoneId);
+
+      allow update: if isSignedIn() &&
+                       isValidPhoneId(phoneId) &&
+                       existing().ownerUid == request.auth.uid &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidPhoneAccessGrant(incoming(), phoneId) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'seatId', 'salesmanName', 'roleLabel', 'isActive',
+                         'allowedProfiles', 'permissions', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() &&
+                       isValidPhoneId(phoneId) &&
+                       existing().ownerUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow get: if (isOwner(userId) || isActiveSalesmanFor(userId)) && isValidId(userId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'userId', 'ownerName', 'businessName', 'currencySymbol',
+                         'fiscalYearLabel', 'businessType', 'monthlySalesTarget',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'ownerName', 'ownerEmail', 'businessName', 'gstin',
+                         'address', 'state', 'pincode',
+                         'currencySymbol', 'fiscalYearLabel', 'businessType',
+                         'monthlySalesTarget', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidBusinessProfile(incoming());
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidBusinessProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'ownerName', 'ownerEmail', 'businessName', 'gstin',
+                         'address', 'state', 'pincode',
+                         'currencySymbol', 'fiscalYearLabel', 'businessType',
+                         'monthlySalesTarget', 'updatedAt'
+                       ]);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // Owner-managed 5 salesman seats (seat_1..seat_5)
+      match /salesmen/{seatId} {
+        allow get: if isOwner(userId) && isValidSeatId(seatId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidSeatId(seatId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'seatId', 'name', 'phoneNumber', 'roleLabel',
+                           'isActive', 'allowedProfiles', 'permissions', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'seatId', 'name', 'phoneNumber', 'roleLabel',
+                           'isActive', 'allowedProfiles', 'permissions', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidSalesmanSeat(incoming(), seatId);
+
+        allow update: if isOwner(userId) &&
+                         isValidSeatId(seatId) &&
+                         isValidSalesmanSeat(incoming(), seatId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().seatId == existing().seatId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'name', 'phoneNumber', 'roleLabel', 'isActive',
+                           'allowedProfiles', 'permissions', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidSeatId(seatId);
+      }
+
+      match /business_profiles/{profileId} {
+        allow get: if (isOwner(userId) || isActiveSalesmanFor(userId)) && isValidId(profileId);
+        allow list: if isOwner(userId) || isActiveSalesmanFor(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'ownerName', 'businessName', 'currencySymbol',
+                           'fiscalYearLabel', 'businessType', 'monthlySalesTarget',
+                           'profileMode', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'ownerName', 'ownerEmail', 'businessName', 'gstin',
+                           'address', 'state', 'pincode',
+                           'currencySymbol', 'fiscalYearLabel', 'businessType',
+                           'monthlySalesTarget', 'profileMode', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidProfileSlot(incoming(), profileId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(profileId) &&
+                         isValidProfileSlot(incoming(), profileId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().profileMode == existing().profileMode &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'ownerName', 'ownerEmail', 'businessName', 'gstin',
+                           'address', 'state', 'pincode',
+                           'currencySymbol', 'fiscalYearLabel', 'businessType',
+                           'monthlySalesTarget', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && profileId in ['main_2', 'plain_1'];
+      }
+
+      match /erp_modules/{moduleId} {
+        allow get: if (isOwner(userId) || isActiveSalesmanFor(userId)) && isValidId(moduleId);
+        allow list: if isOwner(userId) || isActiveSalesmanFor(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(moduleId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'code', 'title', 'subtitle', 'status',
+                           'isPinned', 'sortOrder', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'code', 'title', 'subtitle', 'status',
+                           'isPinned', 'sortOrder', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidErpModule(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(moduleId) &&
+                         isValidErpModule(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().code == existing().code &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['isPinned', 'sortOrder', 'updatedAt']) ||
+                           (
+                             existing().code != 'dashboard' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isPinned', 'updatedAt'])
+                           )
+                         );
+
+        allow delete: if isOwner(userId) && isValidId(moduleId);
+      }
+
+      match /dashboard_entries/{entryId} {
+        allow get: if isValidId(entryId) && (
+          isOwner(userId) ||
+          (isActiveSalesmanFor(userId) && (salesmanPerms().canViewOverview == true || salesmanPerms().canViewExpenses == true || salesmanPerms().canViewReports == true))
+        );
+        allow list: if isOwner(userId) ||
+                       (isActiveSalesmanFor(userId) && (salesmanPerms().canViewOverview == true || salesmanPerms().canViewExpenses == true || salesmanPerms().canViewReports == true));
+
+        allow create: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canAddQuickEntry') && isProfileAllowedForSalesman(incoming()))) &&
+                         isValidId(entryId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'partyName', 'category',
+                           'amount', 'status', 'referenceCode',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'businessProfileId', 'title', 'partyName', 'category',
+                           'amount', 'status', 'referenceCode',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidDashboardEntry(incoming());
+
+        allow update: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canAddQuickEntry') && isExistingDocProfileAllowed(userId))) &&
+                         isValidId(entryId) &&
+                         isValidDashboardEntry(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           (
+                             existing().status == 'pending' &&
+                             incoming().status == 'paid' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                           ) ||
+                           (
+                             existing().status == 'pending' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'title', 'partyName', 'category', 'amount', 'referenceCode', 'updatedAt'
+                             ])
+                           )
+                         );
+
+        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canAddQuickEntry') && isExistingDocProfileAllowed(userId))) && isValidId(entryId);
+      }
+
+      match /parties/{partyId} {
+        allow get: if isValidId(partyId) && (
+          isOwner(userId) ||
+          (isActiveSalesmanFor(userId) && (
+            salesmanPerms().canViewParties == true ||
+            salesmanPerms().canCreateInvoices == true ||
+            salesmanPerms().canEditDeleteInvoices == true ||
+            salesmanPerms().canManageStock == true ||
+            salesmanPerms().canViewExpenses == true ||
+            salesmanPerms().canManageExpenses == true
+          ))
+        );
+        allow list: if isOwner(userId) ||
+                       (isActiveSalesmanFor(userId) && (
+                         salesmanPerms().canViewParties == true ||
+                         salesmanPerms().canCreateInvoices == true ||
+                         salesmanPerms().canEditDeleteInvoices == true ||
+                         salesmanPerms().canManageStock == true ||
+                         salesmanPerms().canViewExpenses == true ||
+                         salesmanPerms().canManageExpenses == true
+                       ));
+
+        allow create: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageParties') && isProfileAllowedForSalesman(incoming()))) &&
+                         isValidId(partyId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'name', 'partyType', 'phone', 'gstin',
+                           'openingDue', 'totalBilled', 'totalPaid', 'creditLimit',
+                           'notes', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'businessProfileId', 'name', 'partyType', 'phone', 'gstin',
+                           'address', 'state', 'pincode',
+                           'openingDue', 'totalBilled', 'totalPaid', 'creditLimit',
+                           'notes', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidErpParty(incoming());
+
+        allow update: if isValidId(partyId) &&
+                         isValidErpParty(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           isOwner(userId) ||
+                           (
+                             isActiveSalesmanFor(userId) &&
+                             isExistingDocProfileAllowed(userId) &&
+                             (
+                               (
+                                 salesmanPerms().canManageParties == true &&
+                                 incoming().diff(existing()).affectedKeys().hasOnly([
+                                   'name', 'partyType', 'phone', 'gstin',
+                                   'address', 'state', 'pincode',
+                                   'openingDue', 'creditLimit', 'notes', 'updatedAt'
+                                 ])
+                               ) ||
+                               (
+                                 (
+                                   salesmanPerms().canManageParties == true ||
+                                   salesmanPerms().canCreateInvoices == true ||
+                                   salesmanPerms().canEditDeleteInvoices == true ||
+                                   salesmanPerms().canManageStock == true
+                                 ) &&
+                                 incoming().diff(existing()).affectedKeys().hasOnly([
+                                   'totalBilled', 'totalPaid', 'updatedAt'
+                                 ])
+                               )
+                             )
+                           )
+                         ) &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'name', 'partyType', 'phone', 'gstin',
+                             'address', 'state', 'pincode',
+                             'openingDue', 'creditLimit', 'notes', 'updatedAt'
+                           ]) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'totalBilled', 'totalPaid', 'updatedAt'
+                           ])
+                         );
+
+        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageParties') && isExistingDocProfileAllowed(userId))) && isValidId(partyId);
+      }
+
+      match /inventory_items/{itemId} {
+        allow get: if isValidId(itemId) && (
+          isOwner(userId) ||
+          (isActiveSalesmanFor(userId) && (
+            salesmanPerms().canViewStock == true ||
+            salesmanPerms().canCreateInvoices == true ||
+            salesmanPerms().canEditDeleteInvoices == true
+          ))
+        );
+        allow list: if isOwner(userId) ||
+                       (isActiveSalesmanFor(userId) && (
+                         salesmanPerms().canViewStock == true ||
+                         salesmanPerms().canCreateInvoices == true ||
+                         salesmanPerms().canEditDeleteInvoices == true
+                       ));
+
+        allow create: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageStock') && isProfileAllowedForSalesman(incoming()))) &&
+                         isValidId(itemId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'name', 'sku', 'category', 'unit',
+                           'salePrice', 'purchasePrice', 'gstRatePercent',
+                           'stockQty', 'lowStockThreshold', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'businessProfileId', 'name', 'sku', 'hsnCode', 'category', 'unit',
+                           'salePrice', 'purchasePrice', 'gstRatePercent',
+                           'stockQty', 'lowStockThreshold', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidInventoryItem(incoming());
+
+        allow update: if isValidId(itemId) &&
+                         isValidInventoryItem(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           isOwner(userId) ||
+                           (
+                             isActiveSalesmanFor(userId) &&
+                             isExistingDocProfileAllowed(userId) &&
+                             (
+                               (
+                                 salesmanPerms().canManageStock == true &&
+                                 (
+                                   incoming().diff(existing()).affectedKeys().hasOnly([
+                                     'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
+                                     'purchasePrice', 'gstRatePercent', 'stockQty',
+                                     'lowStockThreshold', 'updatedAt'
+                                   ]) ||
+                                   incoming().diff(existing()).affectedKeys().hasOnly([
+                                     'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
+                                   ])
+                                 )
+                               ) ||
+                               (
+                                 (
+                                   salesmanPerms().canManageStock == true ||
+                                   salesmanPerms().canCreateInvoices == true ||
+                                   salesmanPerms().canEditDeleteInvoices == true
+                                 ) &&
+                                 incoming().diff(existing()).affectedKeys().hasOnly([
+                                   'stockQty', 'updatedAt'
+                                 ])
+                               )
+                             )
+                           )
+                         ) &&
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
+                             'purchasePrice', 'gstRatePercent', 'stockQty',
+                             'lowStockThreshold', 'updatedAt'
+                           ]) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
+                           ]) ||
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'stockQty', 'updatedAt'
+                           ])
+                         );
+
+        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageStock') && isExistingDocProfileAllowed(userId))) && isValidId(itemId);
+      }
+
+      match /invoices/{invoiceId} {
+        allow get: if isValidId(invoiceId) && (
+          isOwner(userId) ||
+          (isActiveSalesmanFor(userId) && (
+            salesmanPerms().canViewBilling == true ||
+            salesmanPerms().canCreateInvoices == true ||
+            salesmanPerms().canViewOverview == true ||
+            salesmanPerms().canViewExpenses == true ||
+            salesmanPerms().canViewReports == true
+          ))
+        );
+        allow list: if isOwner(userId) ||
+                       (isActiveSalesmanFor(userId) && (
+                         salesmanPerms().canViewBilling == true ||
+                         salesmanPerms().canCreateInvoices == true ||
+                         salesmanPerms().canViewOverview == true ||
+                         salesmanPerms().canViewExpenses == true ||
+                         salesmanPerms().canViewReports == true
+                       ));
+
+        allow create: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canCreateInvoices') && isProfileAllowedForSalesman(incoming()))) &&
+                         isValidId(invoiceId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'invoiceNumber', 'partyId', 'partyName', 'partyGstin',
+                           'invoiceType', 'taxMode', 'paymentMethod', 'status',
+                           'subtotal', 'gstTotal', 'discountAmount', 'grandTotal',
+                           'paidAmount', 'notes', 'lineItems', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'businessProfileId', 'invoiceNumber', 'partyId', 'partyName', 'partyGstin',
+                           'partyAddress', 'partyState', 'partyPincode',
+                           'invoiceType', 'taxMode', 'paymentMethod', 'status',
+                           'subtotal', 'gstTotal', 'discountAmount', 'grandTotal',
+                           'paidAmount', 'notes', 'lineItems', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidGstInvoice(incoming());
+
+        allow update: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canEditDeleteInvoices') && isExistingDocProfileAllowed(userId))) &&
+                         isValidId(invoiceId) &&
+                         isValidGstInvoice(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           // Action: Record payment on unpaid/partial invoice (terminal lock once paid)
+                           (
+                             existing().status != 'paid' &&
+                             incoming().invoiceNumber == existing().invoiceNumber &&
+                             incoming().grandTotal == existing().grandTotal &&
+                             incoming().paidAmount >= existing().paidAmount &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'paidAmount', 'status', 'paymentMethod', 'updatedAt'
+                             ])
+                           ) ||
+                           // Action: Edit full invoice (items, customer, tax mode, discount, notes)
+                           (
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'invoiceNumber', 'partyId', 'partyName', 'partyGstin',
+                               'partyAddress', 'partyState', 'partyPincode',
+                               'invoiceType', 'taxMode', 'paymentMethod', 'status',
+                               'subtotal', 'gstTotal', 'discountAmount', 'grandTotal',
+                               'paidAmount', 'notes', 'lineItems', 'updatedAt'
+                             ]) &&
+                             (
+                               existing().status != 'paid' ||
+                               incoming().grandTotal != existing().grandTotal ||
+                               incoming().lineItems != existing().lineItems ||
+                               incoming().status == 'paid'
+                             )
+                           )
+                         );
+
+        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canEditDeleteInvoices') && isExistingDocProfileAllowed(userId))) && isValidId(invoiceId);
+      }
+
+      match /expenses/{expenseId} {
+        allow get: if isValidId(expenseId) && (
+          isOwner(userId) ||
+          (isActiveSalesmanFor(userId) && (
+            salesmanPerms().canViewExpenses == true ||
+            salesmanPerms().canViewOverview == true ||
+            salesmanPerms().canViewReports == true
+          ))
+        );
+        allow list: if isOwner(userId) ||
+                       (isActiveSalesmanFor(userId) && (
+                         salesmanPerms().canViewExpenses == true ||
+                         salesmanPerms().canViewOverview == true ||
+                         salesmanPerms().canViewReports == true
+                       ));
+
+        allow create: if (
+                           isOwner(userId) ||
+                           (
+                             isActiveSalesmanFor(userId) &&
+                             isProfileAllowedForSalesman(incoming()) &&
+                             (
+                               salesmanPerms().canManageExpenses == true ||
+                               (salesmanPerms().canManageStock == true && incoming().category == 'purchases')
+                             )
+                           )
+                         ) &&
+                         isValidId(expenseId) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'category', 'paymentMethod', 'status',
+                           'partyId', 'partyName', 'referenceNo', 'amount',
+                           'gstInputAmount', 'notes', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'businessProfileId', 'title', 'category', 'paymentMethod', 'status',
+                           'partyId', 'partyName', 'referenceNo', 'amount',
+                           'gstInputAmount', 'notes', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidErpExpense(incoming());
+
+        allow update: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageExpenses') && isExistingDocProfileAllowed(userId))) &&
+                         isValidId(expenseId) &&
+                         isValidErpExpense(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           // Action: Settle pending expense
+                           (
+                             existing().status == 'pending' &&
+                             incoming().status == 'settled' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'status', 'paymentMethod', 'updatedAt'
+                             ])
+                           ) ||
+                           // Action: Edit expense details
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'title', 'category', 'paymentMethod', 'status',
+                             'partyId', 'partyName', 'referenceNo', 'amount',
+                             'gstInputAmount', 'notes', 'updatedAt'
+                           ])
+                         );
+
+        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageExpenses') && isExistingDocProfileAllowed(userId))) && isValidId(expenseId);
+      }
+    }
+  }
+}

@@ -1,0 +1,429 @@
+{
+  "entities": {
+    "BusinessProfile": {
+      "title": "BusinessProfile",
+      "description": "Authenticated user's Finboss ERP workspace profile, currency, tax ID, and monthly revenue target.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID matching the document path."
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of the business owner or operator."
+        },
+        "ownerEmail": {
+          "type": "string",
+          "description": "Owner email address from Google Sign-In."
+        },
+        "businessName": {
+          "type": "string",
+          "description": "Company or shop name displayed across Finboss ERP."
+        },
+        "gstin": {
+          "type": "string",
+          "description": "Optional GSTIN or business tax registration identifier."
+        },
+        "address": { "type": "string", "description": "Business street address." },
+        "state": { "type": "string", "description": "Indian state or UT name/code." },
+        "pincode": { "type": "string", "description": "6-digit postal PIN code." },
+        "currencySymbol": {
+          "type": "string",
+          "description": "Preferred currency symbol such as ₹, $, €, or £."
+        },
+        "fiscalYearLabel": {
+          "type": "string",
+          "description": "Active fiscal year label such as FY 2026-27."
+        },
+        "businessType": {
+          "type": "string",
+          "description": "Business vertical such as Retail & Wholesale, Services, or Distribution."
+        },
+        "monthlySalesTarget": {
+          "type": "number",
+          "description": "Target monthly revenue used for dashboard KPI progress."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-assigned creation timestamp via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-assigned last update timestamp via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "ownerName",
+        "businessName",
+        "currencySymbol",
+        "fiscalYearLabel",
+        "businessType",
+        "monthlySalesTarget",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BusinessProfileAccount": {
+      "title": "BusinessProfileAccount",
+      "description": "Up to 3 business profile slots per user: main_1 & main_2 (Full Main GST accounts) and plain_1 (Plain Non-GST invoice account).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "businessName": { "type": "string" },
+        "gstin": { "type": "string" },
+        "address": { "type": "string" },
+        "state": { "type": "string" },
+        "pincode": { "type": "string" },
+        "currencySymbol": { "type": "string" },
+        "fiscalYearLabel": { "type": "string" },
+        "businessType": { "type": "string" },
+        "monthlySalesTarget": { "type": "number" },
+        "profileMode": { "type": "string", "enum": ["main_gst", "plain_non_gst"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "ownerName",
+        "businessName",
+        "currencySymbol",
+        "fiscalYearLabel",
+        "businessType",
+        "monthlySalesTarget",
+        "profileMode",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ErpModuleConfig": {
+      "title": "ErpModuleConfig",
+      "description": "Modular ERP capability entry tracking active, queued, and planned modules for the workspace.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["active", "queued", "planned"]
+        },
+        "isPinned": { "type": "boolean" },
+        "sortOrder": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "code",
+        "title",
+        "subtitle",
+        "status",
+        "isPinned",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DashboardEntry": {
+      "title": "DashboardEntry",
+      "description": "Financial ledger summary entry recorded on the ERP overview for live KPI tracking.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "businessProfileId": { "type": "string" },
+        "title": { "type": "string" },
+        "partyName": { "type": "string" },
+        "category": { "type": "string", "enum": ["sale", "expense", "receivable"] },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "pending"] },
+        "referenceCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "title",
+        "partyName",
+        "category",
+        "amount",
+        "status",
+        "referenceCode",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ErpParty": {
+      "title": "ErpParty",
+      "description": "Customer or supplier party with Khata ledger balances, GSTIN, and credit limit.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "businessProfileId": { "type": "string" },
+        "name": { "type": "string" },
+        "partyType": { "type": "string", "enum": ["customer", "supplier"] },
+        "phone": { "type": "string" },
+        "gstin": { "type": "string" },
+        "address": { "type": "string" },
+        "state": { "type": "string" },
+        "pincode": { "type": "string" },
+        "openingDue": { "type": "number" },
+        "totalBilled": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "creditLimit": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "name",
+        "partyType",
+        "phone",
+        "gstin",
+        "openingDue",
+        "totalBilled",
+        "totalPaid",
+        "creditLimit",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Inventory SKU item with sale/purchase pricing, GST slab, and live stock quantity.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "businessProfileId": { "type": "string" },
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "hsnCode": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "salePrice": { "type": "number" },
+        "purchasePrice": { "type": "number" },
+        "gstRatePercent": { "type": "number" },
+        "stockQty": { "type": "number" },
+        "lowStockThreshold": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "name",
+        "sku",
+        "category",
+        "unit",
+        "salePrice",
+        "purchasePrice",
+        "gstRatePercent",
+        "stockQty",
+        "lowStockThreshold",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GstInvoice": {
+      "title": "GstInvoice",
+      "description": "GST tax invoice or POS bill with bounded line items, tax split, and payment status.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "businessProfileId": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "partyId": { "type": "string" },
+        "partyName": { "type": "string" },
+        "partyGstin": { "type": "string" },
+        "partyAddress": { "type": "string" },
+        "partyState": { "type": "string" },
+        "partyPincode": { "type": "string" },
+        "invoiceType": { "type": "string", "enum": ["tax_invoice", "pos_bill"] },
+        "taxMode": { "type": "string", "enum": ["cgst_sgst", "igst", "none"] },
+        "paymentMethod": { "type": "string", "enum": ["cash", "upi", "card", "credit"] },
+        "status": { "type": "string", "enum": ["paid", "partial", "unpaid"] },
+        "subtotal": { "type": "number" },
+        "gstTotal": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "notes": { "type": "string" },
+        "lineItems": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "invoiceNumber",
+        "partyId",
+        "partyName",
+        "partyGstin",
+        "invoiceType",
+        "taxMode",
+        "paymentMethod",
+        "status",
+        "subtotal",
+        "gstTotal",
+        "discountAmount",
+        "grandTotal",
+        "paidAmount",
+        "notes",
+        "lineItems",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ErpExpense": {
+      "title": "ErpExpense",
+      "description": "Business operating expense, petty cash outflow, or supplier purchase payment with optional GST ITC.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "businessProfileId": { "type": "string" },
+        "title": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["rent", "payroll", "utilities", "purchases", "transport", "marketing", "tax", "other"]
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["cash", "upi", "bank", "card"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["settled", "pending"]
+        },
+        "partyId": { "type": "string" },
+        "partyName": { "type": "string" },
+        "referenceNo": { "type": "string" },
+        "amount": { "type": "number" },
+        "gstInputAmount": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "title",
+        "category",
+        "paymentMethod",
+        "status",
+        "partyId",
+        "partyName",
+        "referenceNo",
+        "amount",
+        "gstInputAmount",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SalesmanSeat": {
+      "title": "SalesmanSeat",
+      "description": "Owner-managed salesman seat (max 5: seat_1..seat_5) with E.164 phone OTP login and granular ERP permissions.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "seatId": { "type": "string", "enum": ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"] },
+        "name": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "roleLabel": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "allowedProfiles": { "type": "array" },
+        "permissions": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "seatId",
+        "name",
+        "phoneNumber",
+        "roleLabel",
+        "isActive",
+        "allowedProfiles",
+        "permissions",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PhoneAccessGrant": {
+      "title": "PhoneAccessGrant",
+      "description": "Verified E.164 phone-number lookup linking an OTP-authenticated salesman to their Owner workspace UID and live permissions.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "seatId": { "type": "string", "enum": ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"] },
+        "phoneNumber": { "type": "string" },
+        "salesmanName": { "type": "string" },
+        "roleLabel": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "allowedProfiles": { "type": "array" },
+        "permissions": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "seatId",
+        "phoneNumber",
+        "salesmanName",
+        "roleLabel",
+        "isActive",
+        "allowedProfiles",
+        "permissions",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/BusinessProfile" },
+      "description": "Per-user primary business profile fallback."
+    },
+    "/users/{userId}/business_profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/BusinessProfileAccount" },
+      "description": "User's multi-profile business slots (main_1, main_2, plain_1; max 3 accounts)."
+    },
+    "/users/{userId}/erp_modules/{moduleId}": {
+      "schema": { "$ref": "#/entities/ErpModuleConfig" },
+      "description": "User's modular ERP roadmap, pin preferences, and rollout priorities."
+    },
+    "/users/{userId}/dashboard_entries/{entryId}": {
+      "schema": { "$ref": "#/entities/DashboardEntry" },
+      "description": "User's real-time overview ledger entries driving dashboard KPIs."
+    },
+    "/users/{userId}/parties/{partyId}": {
+      "schema": { "$ref": "#/entities/ErpParty" },
+      "description": "User's customers and suppliers with Khata balances."
+    },
+    "/users/{userId}/inventory_items/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "User's product catalog, GST rates, and live stock quantities."
+    },
+    "/users/{userId}/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/GstInvoice" },
+      "description": "User's GST tax invoices and POS bills."
+    },
+    "/users/{userId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/ErpExpense" },
+      "description": "User's operating expenses, cashbook outflows, and GST input credit entries."
+    },
+    "/users/{userId}/salesmen/{seatId}": {
+      "schema": { "$ref": "#/entities/SalesmanSeat" },
+      "description": "Owner's salesman team seats (max 5: seat_1..seat_5) with granular permission configs."
+    },
+    "/phone_access/{phoneNumber}": {
+      "schema": { "$ref": "#/entities/PhoneAccessGrant" },
+      "description": "E.164 phone-keyed access grant resolved by Phone-OTP authenticated salesmen."
+    }
+  }
+}
