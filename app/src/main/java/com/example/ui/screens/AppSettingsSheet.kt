@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -98,6 +99,15 @@ fun AppSettingsSheet(
   }
   var transporterIdDraft by remember(settings.defaultTransporterId) {
     mutableStateOf(settings.defaultTransporterId)
+  }
+  var beneficiaryNameDraft by remember(settings.merchantBeneficiaryName) {
+    mutableStateOf(settings.merchantBeneficiaryName)
+  }
+  var merchantUpiDraft by remember(settings.merchantUpiId) {
+    mutableStateOf(settings.merchantUpiId)
+  }
+  var merchantGatewayKeyDraft by remember(settings.merchantGatewayKeyId) {
+    mutableStateOf(settings.merchantGatewayKeyId)
   }
 
   ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -525,6 +535,51 @@ fun AppSettingsSheet(
           checked = settings.autoSyncWhenOnline,
           testTag = "settings_switch_auto_sync",
           onCheckedChange = { v -> onUpdateSettings { it.copy(autoSyncWhenOnline = v) } },
+        )
+      }
+
+      // 5. PRIVATE MERCHANT PAYOUT CONFIGURATION (Admin / Owner Only)
+      SettingsSectionCard(
+        icon = Icons.Filled.WorkspacePremium,
+        title = "Merchant Payout & Subscription Gateway (Admin Only)",
+      ) {
+        Text(
+          text = "Configure merchant receiving account (Strictly private — never displayed to users).",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+          value = beneficiaryNameDraft,
+          onValueChange = { raw ->
+            beneficiaryNameDraft = raw.take(80)
+            onUpdateSettings { it.copy(merchantBeneficiaryName = raw.trim().take(80)) }
+          },
+          label = { Text("Beneficiary Name") },
+          placeholder = { Text("Raghav Enterprises") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().testTag("settings_merchant_beneficiary_input"),
+        )
+        OutlinedTextField(
+          value = merchantUpiDraft,
+          onValueChange = { raw ->
+            merchantUpiDraft = raw.trim().take(60)
+            onUpdateSettings { it.copy(merchantUpiId = raw.trim().take(60)) }
+          },
+          label = { Text("Merchant UPI ID") },
+          placeholder = { Text("anantbharat@ybl") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().testTag("settings_merchant_upi_input"),
+        )
+        OutlinedTextField(
+          value = merchantGatewayKeyDraft,
+          onValueChange = { raw ->
+            merchantGatewayKeyDraft = raw.trim().take(80)
+            onUpdateSettings { it.copy(merchantGatewayKeyId = raw.trim().take(80)) }
+          },
+          label = { Text("Payment Gateway Key ID (Optional - Razorpay/Cashfree)") },
+          placeholder = { Text("rzp_live_xxxxxxxxxx") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().testTag("settings_merchant_gateway_key_input"),
         )
       }
 

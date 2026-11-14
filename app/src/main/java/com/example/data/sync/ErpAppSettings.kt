@@ -137,6 +137,10 @@ data class ErpAppSettings(
   val defaultDispatchCity: String = "",
   val defaultTransporterName: String = "",
   val defaultTransporterId: String = "",
+  // Private Merchant Payout Configuration (Admin/Owner Only)
+  val merchantBeneficiaryName: String = "Raghav Enterprises",
+  val merchantUpiId: String = "anantbharat@ybl",
+  val merchantGatewayKeyId: String = "",
 ) {
   val showHsnOnPrint: Boolean
     get() = showHsnOnInvoicePrint
@@ -270,6 +274,15 @@ class ErpSettingsStore(context: Context) {
       defaultTransporterId =
         prefs.getString("defaultTransporterId", defaults.defaultTransporterId)
           ?: defaults.defaultTransporterId,
+      merchantBeneficiaryName =
+        prefs.getString("merchantBeneficiaryName", defaults.merchantBeneficiaryName)
+          ?: defaults.merchantBeneficiaryName,
+      merchantUpiId =
+        prefs.getString("merchantUpiId", defaults.merchantUpiId)
+          ?: defaults.merchantUpiId,
+      merchantGatewayKeyId =
+        prefs.getString("merchantGatewayKeyId", defaults.merchantGatewayKeyId)
+          ?: defaults.merchantGatewayKeyId,
     )
   }
 
@@ -312,6 +325,9 @@ class ErpSettingsStore(context: Context) {
       .putString("defaultDispatchCity", s.defaultDispatchCity.trim().take(60))
       .putString("defaultTransporterName", s.defaultTransporterName.trim().take(80))
       .putString("defaultTransporterId", s.defaultTransporterId.trim().uppercase().take(20))
+      .putString("merchantBeneficiaryName", s.merchantBeneficiaryName.trim().take(80))
+      .putString("merchantUpiId", s.merchantUpiId.trim().take(60))
+      .putString("merchantGatewayKeyId", s.merchantGatewayKeyId.trim().take(80))
       .apply()
   }
 

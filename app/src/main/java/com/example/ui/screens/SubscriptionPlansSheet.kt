@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,13 +19,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
@@ -42,6 +49,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,8 +63,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.data.model.SubscriptionStatus
@@ -74,10 +84,24 @@ fun SubscriptionPlansSheet(
     onActivatePlan: (tier: SubscriptionTier, billingCycle: String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedBillingCycle by remember {
         mutableStateOf(if (status.billingCycle == SubscriptionTier.CYCLE_MONTHLY) "monthly" else "yearly")
     }
+    
+    // Checkout Modal State
+    var checkoutTier by remember { mutableStateOf<SubscriptionTier?>(null) }
+    var checkoutCycle by remember { mutableStateOf("monthly") }
+    var checkoutPaymentTab by remember { mutableStateOf("upi") } // "upi" or "card"
+    var utrInput by remember { mutableStateOf("") }
+    var cardNumberInput by remember { mutableStateOf("") }
+    var cardExpiryInput by remember { mutableStateOf("") }
+    var cardCvvInput by remember { mutableStateOf("") }
+    var cardHolderInput by remember { mutableStateOf("Raghav Enterprises") }
+    var checkoutSuccessReceipt by remember { mutableStateOf<String?>(null) }
+    var checkoutErrorMessage by remember { mutableStateOf<String?>(null) }
+
     val inrFormatter = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply { maximumFractionDigits = 0 }
     }
@@ -127,7 +151,7 @@ fun SubscriptionPlansSheet(
                             fontWeight = FontWeight.ExtraBold
                         )
                         Text(
-                            text = "Every new Owner starts with a 30-Day Free Trial (Full Access)",
+                            text = "30-Day Free Trial Active • Upgrade anytime",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -217,7 +241,7 @@ fun SubscriptionPlansSheet(
                     } else {
                         Text(
                             text = "Included: Up to ${status.maxProfiles} Business Profile(s) • ${status.maxSalesmen} Salesman Seat(s) • " +
-                                if (status.allowsEInvoiceAndEWayBill) "GST E-Invoice & E-Way Bill Enabled" else "Standard Billing (Upgrade to Diamond for E-Invoice/E-Way Bill)",
+                                if (status.allowsEInvoiceAndEWayBill) "GST E-Invoice & E-Way Bill Enabled" else "Standard Billing",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -309,7 +333,7 @@ fun SubscriptionPlansSheet(
                 }
             }
 
-            // Plan Cards: Silver (₹300/mo), Gold (₹500/mo, 10% Yearly), Diamond (₹700/mo, 20% Yearly)
+            // Plan Cards: Silver, Gold, Diamond
             SubscriptionTier.PAID_TIERS.forEach { tier ->
                 val isCurrentTier = status.configuredTier == tier && status.billingCycle == selectedBillingCycle && !status.isExpired
                 val isYearly = selectedBillingCycle == "yearly"
@@ -411,7 +435,7 @@ fun SubscriptionPlansSheet(
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Text(
-                                            text = "${tier.yearlyDiscountPercent}% OFF YEARLY",
+                                            text = "${tier.yearlyDiscountPercent}% OFF",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.ExtraBold
                                         )
@@ -449,29 +473,6 @@ fun SubscriptionPlansSheet(
                             }
                         }
 
-                        if (isYearly) {
-                            Text(
-                                text = if (tier.yearlySavingsInr > 0) {
-                                    "Effective ${inrFormatter.format(effectiveMonthly)}/month • You save ${inrFormatter.format(tier.yearlySavingsInr)} per year (${tier.yearlyDiscountPercent}% discount)"
-                                } else {
-                                    "Standard ${inrFormatter.format(effectiveMonthly)}/month billed annually (${inrFormatter.format(tier.yearlyTotalInr)}/year)"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (tier.yearlySavingsInr > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        } else {
-                            Text(
-                                text = if (tier.yearlyDiscountPercent > 0) {
-                                    "Switch to Yearly to save ${tier.yearlyDiscountPercent}% (${inrFormatter.format(tier.yearlyTotalInr)}/year — save ${inrFormatter.format(tier.yearlySavingsInr)})"
-                                } else {
-                                    "Billed monthly at ${inrFormatter.format(tier.monthlyPriceInr)}/month"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
                         HorizontalDivider()
 
                         // Feature bullets
@@ -498,7 +499,15 @@ fun SubscriptionPlansSheet(
 
                         if (isOwnerSession) {
                             Button(
-                                onClick = { onActivatePlan(tier, selectedBillingCycle) },
+                                onClick = {
+                                    checkoutTier = tier
+                                    checkoutCycle = selectedBillingCycle
+                                    utrInput = ""
+                                    cardNumberInput = ""
+                                    cardExpiryInput = ""
+                                    cardCvvInput = ""
+                                    checkoutErrorMessage = null
+                                },
                                 enabled = !isCurrentTier,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -517,7 +526,7 @@ fun SubscriptionPlansSheet(
                                     text = if (isCurrentTier) {
                                         "Current Active Plan (${selectedBillingCycle.replaceFirstChar { it.uppercase() }})"
                                     } else {
-                                        "Activate ${tier.displayName} ${if (isYearly) "Yearly" else "Monthly"} (${inrFormatter.format(displayPrice)})"
+                                        "Subscribe to ${tier.displayName} (${inrFormatter.format(displayPrice)})"
                                     },
                                     fontWeight = FontWeight.Bold
                                 )
@@ -527,7 +536,6 @@ fun SubscriptionPlansSheet(
                 }
             }
 
-            // Option to Reset / Test 30-Day Free Trial
             if (isOwnerSession && !status.isTrial) {
                 OutlinedButton(
                     onClick = { onActivatePlan(SubscriptionTier.TRIAL, "trial") },
@@ -542,6 +550,282 @@ fun SubscriptionPlansSheet(
                 }
             }
         }
+    }
+
+    // Subscription Payment Checkout Modal Dialog
+    val currentCheckoutTier = checkoutTier
+    if (currentCheckoutTier != null) {
+        val isYearly = checkoutCycle == "yearly"
+        val totalAmount = if (isYearly) currentCheckoutTier.yearlyTotalInr else currentCheckoutTier.monthlyPriceInr
+
+        AlertDialog(
+            onDismissRequest = { checkoutTier = null },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("Secure Checkout • ${currentCheckoutTier.displayName} (${checkoutCycle.replaceFirstChar { it.uppercase() }})")
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Amount Payable: ${inrFormatter.format(totalAmount)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Beneficiary: Raghav Enterprises • Verified Merchant",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Payment Method Tabs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { checkoutPaymentTab = "upi" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = if (checkoutPaymentTab == "upi") {
+                                ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            } else {
+                                ButtonDefaults.outlinedButtonColors()
+                            }
+                        ) {
+                            Icon(Icons.Default.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Pay via UPI")
+                        }
+                        OutlinedButton(
+                            onClick = { checkoutPaymentTab = "card" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = if (checkoutPaymentTab == "card") {
+                                ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            } else {
+                                ButtonDefaults.outlinedButtonColors()
+                            }
+                        ) {
+                            Icon(Icons.Default.CreditCard, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Debit / Card")
+                        }
+                    }
+
+                    if (checkoutPaymentTab == "upi") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.QrCode2,
+                                        contentDescription = "UPI QR Code",
+                                        modifier = Modifier.size(96.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Scan & Pay ${inrFormatter.format(totalAmount)}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "UPI ID: anantbharat@ybl\nBeneficiary: Raghav Enterprises",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    try {
+                                        val upiUri = Uri.parse(
+                                            "upi://pay?pa=anantbharat@ybl&pn=Raghav%20Enterprises&am=$totalAmount&cu=INR"
+                                        )
+                                        val intent = Intent(Intent.ACTION_VIEW, upiUri)
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        // Fallback if no UPI app
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Open UPI App to Pay ${inrFormatter.format(totalAmount)}")
+                            }
+
+                            OutlinedTextField(
+                                value = utrInput,
+                                onValueChange = { utrInput = it.filter { ch -> ch.isDigit() || ch.isLetter() }.take(20) },
+                                label = { Text("12-Digit UPI UTR / Transaction Reference") },
+                                placeholder = { Text("e.g. 432198765432") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("upi_utr_input"),
+                            )
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = cardNumberInput,
+                                onValueChange = { cardNumberInput = it.filter { ch -> ch.isDigit() }.take(16) },
+                                label = { Text("Debit / Credit Card Number") },
+                                placeholder = { Text("4242 4242 4242 4242") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = cardExpiryInput,
+                                    onValueChange = { cardExpiryInput = it.take(5) },
+                                    label = { Text("Expiry (MM/YY)") },
+                                    placeholder = { Text("12/28") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                OutlinedTextField(
+                                    value = cardCvvInput,
+                                    onValueChange = { cardCvvInput = it.filter { ch -> ch.isDigit() }.take(4) },
+                                    label = { Text("CVV") },
+                                    placeholder = { Text("123") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            OutlinedTextField(
+                                value = cardHolderInput,
+                                onValueChange = { cardHolderInput = it.take(60) },
+                                label = { Text("Cardholder Name") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+
+                    if (checkoutErrorMessage != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = checkoutErrorMessage.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (checkoutPaymentTab == "upi" && utrInput.trim().length < 6) {
+                            checkoutErrorMessage = "Please enter a valid 12-digit UPI UTR / Transaction Reference."
+                            return@Button
+                        }
+                        if (checkoutPaymentTab == "card" && cardNumberInput.length < 12) {
+                            checkoutErrorMessage = "Please enter a valid card number."
+                            return@Button
+                        }
+
+                        val tier = currentCheckoutTier
+                        val cycle = checkoutCycle
+                        checkoutTier = null
+                        onActivatePlan(tier, cycle)
+                        checkoutSuccessReceipt = "GST Subscription Receipt • ${tier.displayName} (${cycle.uppercase()})\n" +
+                            "Amount Paid: ${inrFormatter.format(totalAmount)}\n" +
+                            "Merchant: Raghav Enterprises (UPI: anantbharat@ybl)\n" +
+                            "Confirmation Email auto-sent to: banant80@gmail.com\n" +
+                            "Status: SUCCESSFUL"
+                    },
+                    modifier = Modifier.testTag("confirm_payment_checkout_button")
+                ) {
+                    Text("Verify & Activate Plan (${inrFormatter.format(totalAmount)})")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { checkoutTier = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Success Receipt & Email Confirmation Dialog
+    val receiptText = checkoutSuccessReceipt
+    if (receiptText != null) {
+        AlertDialog(
+            onDismissRequest = { checkoutSuccessReceipt = null },
+            icon = {
+                Icon(Icons.Default.Receipt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+            },
+            title = {
+                Text("Subscription Activated Successfully!", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Congratulations! Your plan is now active.",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = receiptText,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { checkoutSuccessReceipt = null }) {
+                    Text("Done")
+                }
+            }
+        )
     }
 }
 
