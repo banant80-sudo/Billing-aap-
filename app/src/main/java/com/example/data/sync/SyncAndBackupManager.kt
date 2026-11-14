@@ -105,8 +105,35 @@ class SyncPreferences(context: Context) {
     prefs.edit().putString("active_profile_id_$userId", safeId).apply()
   }
 
+  fun getSalesmanSessionPhone(userId: String): String? =
+    prefs.getString("salesman_session_phone_$userId", null)?.trim()?.takeIf { it.isNotEmpty() }
+
+  fun setSalesmanSessionPhone(userId: String, phoneE164: String?) {
+    val clean = phoneE164?.trim()?.takeIf { it.isNotEmpty() }
+    val editor = prefs.edit()
+    if (clean == null) {
+      editor.remove("salesman_session_phone_$userId")
+    } else {
+      editor.putString("salesman_session_phone_$userId", clean)
+    }
+    editor.apply()
+    sessionRevision.update { it + 1L }
+  }
+
+  fun observeSalesmanSessionPhone(userId: String): Flow<String?> =
+    sessionRevision
+      .let { flow ->
+        kotlinx.coroutines.flow.flow {
+          flow.collect {
+            emit(getSalesmanSessionPhone(userId))
+          }
+        }
+      }
+      .distinctUntilChanged()
+
   private companion object {
     const val PREFS_NAME = "finboss_sync_prefs"
+    val sessionRevision = MutableStateFlow(0L)
   }
 }
 
@@ -222,6 +249,11 @@ object FinbossBackupSerializer {
           put("businessType", p.businessType)
           put("monthlySalesTarget", p.monthlySalesTarget)
           put("profileMode", p.profileMode)
+          put("planTier", p.planTier)
+          put("billingCycle", p.billingCycle)
+          put("trialStartedAtMs", p.trialStartedAtMs)
+          put("planExpiresAtMs", p.planExpiresAtMs)
+          put("planAmountPaid", p.planAmountPaid)
         }
       root.put("businessProfile", prof)
     }
@@ -243,6 +275,11 @@ object FinbossBackupSerializer {
             put("businessType", p.businessType)
             put("monthlySalesTarget", p.monthlySalesTarget)
             put("profileMode", p.profileMode)
+            put("planTier", p.planTier)
+            put("billingCycle", p.billingCycle)
+            put("trialStartedAtMs", p.trialStartedAtMs)
+            put("planExpiresAtMs", p.planExpiresAtMs)
+            put("planAmountPaid", p.planAmountPaid)
           }
         )
       }
@@ -335,6 +372,26 @@ object FinbossBackupSerializer {
           put("paidAmount", inv.paidAmount)
           put("notes", inv.notes)
           put("lineItems", linesArr)
+          put("irn", inv.irn)
+          put("ackNo", inv.ackNo)
+          put("ackDate", inv.ackDate)
+          put("signedQrData", inv.signedQrData)
+          put("einvoiceStatus", inv.einvoiceStatus)
+          put("ewbNumber", inv.ewbNumber)
+          put("ewbDate", inv.ewbDate)
+          put("ewbValidUntil", inv.ewbValidUntil)
+          put("transportMode", inv.transportMode)
+          put("distanceKm", inv.distanceKm)
+          put("fromPlace", inv.fromPlace)
+          put("fromPincode", inv.fromPincode)
+          put("toPlace", inv.toPlace)
+          put("toPincode", inv.toPincode)
+          put("vehicleNumber", inv.vehicleNumber)
+          put("vehicleType", inv.vehicleType)
+          put("transporterName", inv.transporterName)
+          put("transporterId", inv.transporterId)
+          put("transporterDocNo", inv.transporterDocNo)
+          put("transporterDocDate", inv.transporterDocDate)
         }
       )
     }
@@ -403,6 +460,11 @@ object FinbossBackupSerializer {
             businessType = p.optString("businessType", "Retail & Wholesale"),
             monthlySalesTarget = p.optDouble("monthlySalesTarget", 250000.0),
             profileMode = p.optString("profileMode", BusinessProfile.modeForSlot(slotId)),
+            planTier = p.optString("planTier", "trial"),
+            billingCycle = p.optString("billingCycle", "trial"),
+            trialStartedAtMs = p.optLong("trialStartedAtMs", 0L),
+            planExpiresAtMs = p.optLong("planExpiresAtMs", 0L),
+            planAmountPaid = p.optDouble("planAmountPaid", 0.0),
           )
         }
 
@@ -425,6 +487,11 @@ object FinbossBackupSerializer {
             businessType = p.optString("businessType", "Retail & Wholesale"),
             monthlySalesTarget = p.optDouble("monthlySalesTarget", 250000.0),
             profileMode = BusinessProfile.modeForSlot(slotId),
+            planTier = p.optString("planTier", "trial"),
+            billingCycle = p.optString("billingCycle", "trial"),
+            trialStartedAtMs = p.optLong("trialStartedAtMs", 0L),
+            planExpiresAtMs = p.optLong("planExpiresAtMs", 0L),
+            planAmountPaid = p.optDouble("planAmountPaid", 0.0),
           )
         )
       }
@@ -521,6 +588,26 @@ object FinbossBackupSerializer {
             paidAmount = o.optDouble("paidAmount", 0.0),
             notes = o.optString("notes", ""),
             lineItems = lineItems,
+            irn = o.optString("irn", ""),
+            ackNo = o.optString("ackNo", ""),
+            ackDate = o.optString("ackDate", ""),
+            signedQrData = o.optString("signedQrData", ""),
+            einvoiceStatus = o.optString("einvoiceStatus", ""),
+            ewbNumber = o.optString("ewbNumber", ""),
+            ewbDate = o.optString("ewbDate", ""),
+            ewbValidUntil = o.optString("ewbValidUntil", ""),
+            transportMode = o.optString("transportMode", ""),
+            distanceKm = o.optInt("distanceKm", 0),
+            fromPlace = o.optString("fromPlace", ""),
+            fromPincode = o.optString("fromPincode", ""),
+            toPlace = o.optString("toPlace", ""),
+            toPincode = o.optString("toPincode", ""),
+            vehicleNumber = o.optString("vehicleNumber", ""),
+            vehicleType = o.optString("vehicleType", ""),
+            transporterName = o.optString("transporterName", ""),
+            transporterId = o.optString("transporterId", ""),
+            transporterDocNo = o.optString("transporterDocNo", ""),
+            transporterDocDate = o.optString("transporterDocDate", ""),
           )
         )
       }

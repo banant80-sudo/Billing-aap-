@@ -534,6 +534,59 @@ object InvoicePdfPrinter {
         leftNoteY += 11f
       }
     }
+
+    // GST Portal E-Invoice (IRN + Signed QR) & E-Way Bill + Transport Box
+    if (!isPlainNonGst && (invoice.hasEInvoice || invoice.hasEWayBill)) {
+      val gstBoxTop = leftNoteY + 4f
+      val gstBoxRight = summaryLeft - 10f
+      val gstBoxBottom = (gstBoxTop + 92f).coerceAtMost(A4_HEIGHT - 64f)
+      if (gstBoxBottom - gstBoxTop >= 52f) {
+        val gstBoxRect = RectF(MARGIN_X + 4f, gstBoxTop, gstBoxRight, gstBoxBottom)
+        canvas.drawRoundRect(gstBoxRect, 5f, 5f, lightBgPaint)
+        canvas.drawRoundRect(gstBoxRect, 5f, 5f, borderPaint)
+
+        var textLeft = gstBoxRect.left + 8f
+        if (invoice.hasEInvoice) {
+          val qrSize = (gstBoxBottom - gstBoxTop - 14f).coerceIn(40f, 68f)
+          drawPdfQrMatrix(
+            canvas = canvas,
+            left = gstBoxRect.left + 7f,
+            top = gstBoxTop + 7f,
+            boxSize = qrSize,
+            payload = invoice.signedQrData.ifBlank { invoice.irn },
+          )
+          textLeft = gstBoxRect.left + qrSize + 14f
+        }
+
+        var gy = gstBoxTop + 14f
+        if (invoice.hasEInvoice) {
+          canvas.drawText("GST E-INVOICE (IRN VERIFIED)", textLeft, gy, headingPaint)
+          gy += 11f
+          canvas.drawText("Ack No: ${invoice.ackNo}  •  Dt: ${invoice.ackDate.take(16)}", textLeft, gy, bodyPaint)
+          gy += 11f
+          canvas.drawText("IRN: ${invoice.irn.take(32)}", textLeft, gy, mutedPaint)
+          if (invoice.irn.length > 32) {
+            gy += 9f
+            canvas.drawText(invoice.irn.substring(32).take(32), textLeft, gy, mutedPaint)
+          }
+          gy += 12f
+        }
+        if (invoice.hasEWayBill && gy < gstBoxBottom - 6f) {
+          canvas.drawText(
+            "E-Way Bill No: ${invoice.ewbNumber} (${invoice.transportMode.uppercase()} • ${invoice.distanceKm} KM)",
+            textLeft,
+            gy,
+            headingPaint,
+          )
+          gy += 11f
+          val routeLine =
+            "${invoice.fromPlace} (${invoice.fromPincode}) -> ${invoice.toPlace} (${invoice.toPincode}) | Veh: ${invoice.vehicleNumber.ifBlank { "N/A" }}"
+          canvas.drawText(routeLine.take(44), textLeft, gy, bodyPaint)
+        }
+        leftNoteY = gstBoxBottom + 4f
+      }
+    }
+
     if (options.termsText.isNotBlank()) {
       val termsY = maxOf(leftNoteY + 8f, y + summaryHeight + 14f)
       if (termsY < A4_HEIGHT - 56f) {
@@ -569,7 +622,9 @@ object InvoicePdfPrinter {
   ): PdfDocument {
     val width = options.paperSize.widthPt
     val lineCount = invoice.lineItems.size.coerceAtLeast(1)
-    val estimatedHeight = (290 + lineCount * 36 + if (options.showAddressAndState) 30 else 0).coerceAtLeast(360)
+    val einvoiceExtra = if (!isPlainNonGst && (invoice.hasEInvoice || invoice.hasEWayBill)) 85 else 0
+    val estimatedHeight =
+      (290 + lineCount * 36 + if (options.showAddressAndState) 30 else 0 + einvoiceExtra).coerceAtLeast(360)
     val pdf = PdfDocument()
     val page = pdf.startPage(PdfDocument.PageInfo.Builder(width, estimatedHeight, 1).create())
     drawThermalContent(
@@ -773,12 +828,77 @@ object InvoicePdfPrinter {
       y += 10f
     }
 
+    if (!isPlainNonGst && (invoice.hasEInvoice || invoice.hasEWayBill)) {
+      canvas.drawLine(left, y, right, y, dashPaint)
+      y += 10f
+      if (invoice.hasEInvoice) {
+        canvas.drawText("E-INVOICE Ack: ${invoice.ackNo}", left, y, boldLeft)
+        y += 9f
+        canvas.drawText("IRN: ${invoice.irn.take(24)}...", left, y, regularLeft)
+        y += 10f
+      }
+      if (invoice.hasEWayBill) {
+        canvas.drawText("EWB: ${invoice.ewbNumber} (${invoice.distanceKm}KM)", left, y, boldLeft)
+        y += 9f
+        canvas.drawText(
+          "${invoice.fromPlace.take(10)}->${invoice.toPlace.take(10)} ${invoice.vehicleNumber}",
+          left,
+          y,
+          regularLeft,
+        )
+        y += 10f
+      }
+    }
+
     canvas.drawLine(left, y, right, y, dashPaint)
     y += 12f
     val footer = options.footerNote.ifBlank { "Thank you! Visit again." }
     wrapLines(footer, if (isMini58) 24 else 32).take(2).forEach { line ->
       canvas.drawText(line, centerX, y, regularCenter)
       y += 10f
+    }
+  }
+
+  private fun drawPdfQrMatrix(
+    canvas: Canvas,
+    left: Float,
+    top: Float,
+    boxSize: Float,
+    payload: String,
+  ) {
+    val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0F172A") }
+    canvas.drawRect(left, top, left + boxSize, top + boxSize, whitePaint)
+    val gridSize = 21
+    val cell = boxSize / gridSize
+    val bytes = payload.encodeToByteArray()
+
+    fun finderOn(r: Int, c: Int): Boolean {
+      if (r == 0 || r == 6 || c == 0 || c == 6) return true
+      if (r in 2..4 && c in 2..4) return true
+      return false
+    }
+
+    for (r in 0 until gridSize) {
+      for (c in 0 until gridSize) {
+        val on =
+          when {
+            r in 0..6 && c in 0..6 -> finderOn(r, c)
+            r in 0..6 && c in (gridSize - 7) until gridSize -> finderOn(r, c - (gridSize - 7))
+            r in (gridSize - 7) until gridSize && c in 0..6 -> finderOn(r - (gridSize - 7), c)
+            r == 6 || c == 6 -> (r + c) % 2 == 0
+            else -> {
+              val idx = r * gridSize + c
+              val b = if (bytes.isNotEmpty()) bytes[idx % bytes.size].toInt() else idx
+              ((b xor (r * 31 + c * 17)) and 1) == 0
+            }
+          }
+        if (on) {
+          val cl = left + c * cell
+          val ct = top + r * cell
+          canvas.drawRect(cl, ct, cl + cell * 0.94f, ct + cell * 0.94f, darkPaint)
+        }
+      }
     }
   }
 

@@ -35,21 +35,62 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Subscription Tier Resolution & Feature Enforcement (Defaults to 30-Day Free Trial Full Access)
+    function userRootDocPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function isPlanTierIn(userId, allowedTiers) {
+      return !exists(userRootDocPath(userId)) ||
+             !('planTier' in get(userRootDocPath(userId)).data) ||
+             get(userRootDocPath(userId)).data.planTier in allowedTiers;
+    }
+
+    function isPlanAllowedForProfileSlot(userId, profileId) {
+      return profileId == 'main_1' ||
+             isPlanTierIn(userId, profileId == 'main_2' ? ['trial', 'gold', 'diamond'] : ['trial', 'diamond']);
+    }
+
+    function isPlanAllowedForSalesmanSeat(userId, seatId) {
+      return isPlanTierIn(userId, seatId in ['seat_1', 'seat_2'] ? ['trial', 'gold', 'diamond'] : ['trial', 'diamond']);
+    }
+
+    function isPlanAllowedForEInvoiceAndEWayBill(userId) {
+      return isPlanTierIn(userId, ['trial', 'diamond']);
+    }
+
     function hasVerifiedPhoneToken() {
       return isSignedIn() &&
              ('phone_number' in request.auth.token) &&
              isValidPhoneId(request.auth.token.phone_number);
     }
 
+    function salesmanSessionPath() {
+      return /databases/$(database)/documents/salesman_sessions/$(request.auth.uid);
+    }
+
+    function hasSalesmanSession() {
+      return isSignedIn() && exists(salesmanSessionPath());
+    }
+
+    function resolvedSalesmanPhone() {
+      return hasVerifiedPhoneToken()
+        ? request.auth.token.phone_number
+        : get(salesmanSessionPath()).data.phoneNumber;
+    }
+
     function phoneAccessPath() {
-      return /databases/$(database)/documents/phone_access/$(request.auth.token.phone_number);
+      return /databases/$(database)/documents/phone_access/$(resolvedSalesmanPhone());
+    }
+
+    function isActiveGrantFor(grant, userId) {
+      return grant.ownerUid == userId && grant.isActive == true;
     }
 
     function isActiveSalesmanFor(userId) {
-      return hasVerifiedPhoneToken() &&
+      return (hasVerifiedPhoneToken() || hasSalesmanSession()) &&
              exists(phoneAccessPath()) &&
-             get(phoneAccessPath()).data.ownerUid == userId &&
-             get(phoneAccessPath()).data.isActive == true;
+             isActiveGrantFor(get(phoneAccessPath()).data, userId);
     }
 
     function hasSalesmanPermission(userId, permKey) {
@@ -57,23 +98,91 @@ service cloud.firestore {
              get(phoneAccessPath()).data.permissions[permKey] == true;
     }
 
+    function canSalesmanWithGrant(userId, permKey, docData, grant) {
+      return isActiveGrantFor(grant, userId) &&
+             grant.permissions[permKey] == true &&
+             isProfileAllowedInGrant(docData, grant);
+    }
+
+    function canSalesmanWriteProfileDoc(userId, permKey, docData) {
+      return (hasVerifiedPhoneToken() || hasSalesmanSession()) &&
+             exists(phoneAccessPath()) &&
+             canSalesmanWithGrant(userId, permKey, docData, get(phoneAccessPath()).data);
+    }
+
     function salesmanPerms() {
       return get(phoneAccessPath()).data.permissions;
     }
 
-    function isProfileAllowedForSalesman(data) {
+    function isProfileAllowedInGrant(data, grant) {
       return !('businessProfileId' in data) ||
              data.businessProfileId == null ||
              data.businessProfileId == '' ||
-             data.businessProfileId in get(phoneAccessPath()).data.allowedProfiles;
+             data.businessProfileId in grant.allowedProfiles;
+    }
+
+    function isProfileAllowedForSalesman(data) {
+      return isProfileAllowedInGrant(data, get(phoneAccessPath()).data);
     }
 
     function isExistingDocProfileAllowed(userId) {
-      return isOwner(userId) ||
-             !('businessProfileId' in existing()) ||
-             existing().businessProfileId == null ||
-             existing().businessProfileId == '' ||
-             existing().businessProfileId in get(phoneAccessPath()).data.allowedProfiles;
+      return isOwner(userId) || isProfileAllowedInGrant(existing(), get(phoneAccessPath()).data);
+    }
+
+    function canSalesmanUpdatePartyWithGrant(userId, grant) {
+      return isActiveGrantFor(grant, userId) &&
+             isProfileAllowedInGrant(existing(), grant) &&
+             (
+               (
+                 grant.permissions.canManageParties == true &&
+                 incoming().diff(existing()).affectedKeys().hasOnly([
+                   'name', 'partyType', 'phone', 'gstin',
+                   'address', 'state', 'pincode',
+                   'openingDue', 'creditLimit', 'notes', 'updatedAt'
+                 ])
+               ) ||
+               (
+                 (
+                   grant.permissions.canManageParties == true ||
+                   grant.permissions.canCreateInvoices == true ||
+                   grant.permissions.canEditDeleteInvoices == true ||
+                   grant.permissions.canManageStock == true
+                 ) &&
+                 incoming().diff(existing()).affectedKeys().hasOnly([
+                   'totalBilled', 'totalPaid', 'updatedAt'
+                 ])
+               )
+             );
+    }
+
+    function canSalesmanUpdateInventoryWithGrant(userId, grant) {
+      return isActiveGrantFor(grant, userId) &&
+             isProfileAllowedInGrant(existing(), grant) &&
+             (
+               (
+                 grant.permissions.canManageStock == true &&
+                 (
+                   incoming().diff(existing()).affectedKeys().hasOnly([
+                     'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
+                     'purchasePrice', 'gstRatePercent', 'stockQty',
+                     'lowStockThreshold', 'updatedAt'
+                   ]) ||
+                   incoming().diff(existing()).affectedKeys().hasOnly([
+                     'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
+                   ])
+                 )
+               ) ||
+               (
+                 (
+                   grant.permissions.canManageStock == true ||
+                   grant.permissions.canCreateInvoices == true ||
+                   grant.permissions.canEditDeleteInvoices == true
+                 ) &&
+                 incoming().diff(existing()).affectedKeys().hasOnly([
+                   'stockQty', 'updatedAt'
+                 ])
+               )
+             );
     }
 
     function isValidTimestamp(ts) {
@@ -148,6 +257,14 @@ service cloud.firestore {
              isValidTimestamp(data.updatedAt);
     }
 
+    function isValidSubscriptionFields(data) {
+      return (!('planTier' in data) || data.planTier == null || (data.planTier is string && data.planTier in ['trial', 'silver', 'gold', 'diamond'])) &&
+             (!('billingCycle' in data) || data.billingCycle == null || (data.billingCycle is string && data.billingCycle in ['trial', 'monthly', 'yearly'])) &&
+             (!('trialStartedAtMs' in data) || data.trialStartedAtMs == null || (data.trialStartedAtMs is number && data.trialStartedAtMs >= 0 && data.trialStartedAtMs <= 9999999999999)) &&
+             (!('planExpiresAtMs' in data) || data.planExpiresAtMs == null || (data.planExpiresAtMs is number && data.planExpiresAtMs >= 0 && data.planExpiresAtMs <= 9999999999999)) &&
+             (!('planAmountPaid' in data) || data.planAmountPaid == null || (data.planAmountPaid is number && data.planAmountPaid >= 0 && data.planAmountPaid <= 10000000));
+    }
+
     function isValidBusinessProfile(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
@@ -161,6 +278,7 @@ service cloud.firestore {
              data.fiscalYearLabel is string && data.fiscalYearLabel.size() >= 2 && data.fiscalYearLabel.size() <= 20 &&
              data.businessType is string && data.businessType.size() >= 1 && data.businessType.size() <= 40 &&
              data.monthlySalesTarget is number && data.monthlySalesTarget >= 0 && data.monthlySalesTarget <= 1000000000 &&
+             isValidSubscriptionFields(data) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -245,6 +363,20 @@ service cloud.firestore {
              isValidTimestamp(data.updatedAt);
     }
 
+    function isValidEInvoiceAndEWayBillFields(data) {
+      return (!('irn' in data) || (data.irn is string && data.irn.size() <= 64)) &&
+             (!('einvoiceStatus' in data) || data.einvoiceStatus in ['', 'generated', 'cancelled']) &&
+             (!('ewbNumber' in data) || (data.ewbNumber is string && data.ewbNumber.size() <= 20)) &&
+             (!('transportMode' in data) || data.transportMode in ['', 'road', 'rail', 'air', 'ship']) &&
+             (!('distanceKm' in data) || (data.distanceKm is number && data.distanceKm >= 0 && data.distanceKm <= 4000)) &&
+             (!('vehicleType' in data) || data.vehicleType in ['', 'regular', 'odc']);
+    }
+
+    function hasPopulatedEInvoiceOrEWayBill(data) {
+      return (('irn' in data) && data.irn is string && data.irn.size() > 0) ||
+             (('ewbNumber' in data) && data.ewbNumber is string && data.ewbNumber.size() > 0);
+    }
+
     function isValidGstInvoice(data) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              isValidOptionalProfileRef(data) &&
@@ -252,9 +384,6 @@ service cloud.firestore {
              data.partyId is string && data.partyId.size() <= 128 &&
              data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 100 &&
              data.partyGstin is string && data.partyGstin.size() <= 30 &&
-             (!('partyAddress' in data) || data.partyAddress == null || (data.partyAddress is string && data.partyAddress.size() <= 200)) &&
-             (!('partyState' in data) || data.partyState == null || (data.partyState is string && data.partyState.size() <= 60)) &&
-             (!('partyPincode' in data) || data.partyPincode == null || (data.partyPincode is string && data.partyPincode.size() <= 12)) &&
              data.invoiceType in ['tax_invoice', 'pos_bill'] &&
              data.taxMode in ['cgst_sgst', 'igst', 'none'] &&
              data.paymentMethod in ['cash', 'upi', 'card', 'credit'] &&
@@ -267,6 +396,7 @@ service cloud.firestore {
              data.notes is string && data.notes.size() <= 240 &&
              data.lineItems is list && data.lineItems.size() >= 1 && data.lineItems.size() <= 25 &&
              data.lineItems[0] is map &&
+             isValidEInvoiceAndEWayBillFields(data) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -288,12 +418,13 @@ service cloud.firestore {
              isValidTimestamp(data.updatedAt);
     }
 
-    // Verified E.164 phone-keyed salesman access lookup (no listing allowed; read only by matching phone or owner)
+    // Verified E.164 phone-keyed salesman access lookup (no listing allowed; read only by matching phone, active session, or owner)
     match /phone_access/{phoneId} {
       allow get: if isSignedIn() &&
                     isValidPhoneId(phoneId) &&
                     (
-                      (hasVerifiedPhoneToken() && request.auth.token.phone_number == phoneId) ||
+                      !hasVerifiedPhoneToken() ||
+                      request.auth.token.phone_number == phoneId ||
                       (resource != null && resource.data.ownerUid == request.auth.uid)
                     );
       allow list: if false;
@@ -301,6 +432,7 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
                        isValidPhoneId(phoneId) &&
                        incoming().ownerUid == request.auth.uid &&
+                       isPlanAllowedForSalesmanSeat(request.auth.uid, incoming().seatId) &&
                        incoming().keys().hasAll([
                          'ownerUid', 'seatId', 'phoneNumber', 'salesmanName', 'roleLabel',
                          'isActive', 'allowedProfiles', 'permissions', 'createdAt', 'updatedAt'
@@ -316,6 +448,7 @@ service cloud.firestore {
                        existing().ownerUid == request.auth.uid &&
                        incoming().ownerUid == existing().ownerUid &&
                        incoming().createdAt == existing().createdAt &&
+                       isPlanAllowedForSalesmanSeat(request.auth.uid, incoming().seatId) &&
                        isValidPhoneAccessGrant(incoming(), phoneId) &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'seatId', 'salesmanName', 'roleLabel', 'isActive',
@@ -325,6 +458,28 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
                        isValidPhoneId(phoneId) &&
                        existing().ownerUid == request.auth.uid;
+    }
+
+    // Per-UID active salesman session binding verified against /phone_access/{phoneNumber}
+    match /salesman_sessions/{sessionUid} {
+      allow get: if isSignedIn() && request.auth.uid == sessionUid;
+      allow list: if false;
+
+      allow create, update: if isSignedIn() &&
+                               request.auth.uid == sessionUid &&
+                               isValidId(sessionUid) &&
+                               incoming().uid == sessionUid &&
+                               isValidPhoneId(incoming().phoneNumber) &&
+                               isValidId(incoming().ownerUid) &&
+                               isValidSeatId(incoming().seatId) &&
+                               isValidTimestamp(incoming().updatedAt) &&
+                               incoming().keys().hasAll(['uid', 'phoneNumber', 'ownerUid', 'seatId', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['uid', 'phoneNumber', 'ownerUid', 'seatId', 'updatedAt']) &&
+                               exists(/databases/$(database)/documents/phone_access/$(incoming().phoneNumber)) &&
+                               get(/databases/$(database)/documents/phone_access/$(incoming().phoneNumber)).data.ownerUid == incoming().ownerUid &&
+                               get(/databases/$(database)/documents/phone_access/$(incoming().phoneNumber)).data.isActive == true;
+
+      allow delete: if isSignedIn() && request.auth.uid == sessionUid;
     }
 
     match /users/{userId} {
@@ -343,7 +498,9 @@ service cloud.firestore {
                          'userId', 'ownerName', 'ownerEmail', 'businessName', 'gstin',
                          'address', 'state', 'pincode',
                          'currencySymbol', 'fiscalYearLabel', 'businessType',
-                         'monthlySalesTarget', 'createdAt', 'updatedAt'
+                         'monthlySalesTarget', 'planTier', 'billingCycle',
+                         'trialStartedAtMs', 'planExpiresAtMs', 'planAmountPaid',
+                         'createdAt', 'updatedAt'
                        ]) &&
                        isValidBusinessProfile(incoming());
 
@@ -356,18 +513,21 @@ service cloud.firestore {
                          'ownerName', 'ownerEmail', 'businessName', 'gstin',
                          'address', 'state', 'pincode',
                          'currencySymbol', 'fiscalYearLabel', 'businessType',
-                         'monthlySalesTarget', 'updatedAt'
+                         'monthlySalesTarget', 'planTier', 'billingCycle',
+                         'trialStartedAtMs', 'planExpiresAtMs', 'planAmountPaid',
+                         'updatedAt'
                        ]);
 
       allow delete: if isOwner(userId) && isValidId(userId);
 
-      // Owner-managed 5 salesman seats (seat_1..seat_5)
+      // Owner-managed 5 salesman seats (seat_1..seat_5) gated by Subscription Plan
       match /salesmen/{seatId} {
         allow get: if isOwner(userId) && isValidSeatId(seatId);
         allow list: if isOwner(userId);
 
         allow create: if isOwner(userId) &&
                          isValidSeatId(seatId) &&
+                         isPlanAllowedForSalesmanSeat(userId, seatId) &&
                          incoming().userId == userId &&
                          incoming().keys().hasAll([
                            'userId', 'seatId', 'name', 'phoneNumber', 'roleLabel',
@@ -381,6 +541,7 @@ service cloud.firestore {
 
         allow update: if isOwner(userId) &&
                          isValidSeatId(seatId) &&
+                         isPlanAllowedForSalesmanSeat(userId, seatId) &&
                          isValidSalesmanSeat(incoming(), seatId) &&
                          incoming().userId == existing().userId &&
                          incoming().seatId == existing().seatId &&
@@ -399,6 +560,7 @@ service cloud.firestore {
 
         allow create: if isOwner(userId) &&
                          isValidId(profileId) &&
+                         isPlanAllowedForProfileSlot(userId, profileId) &&
                          incoming().userId == request.auth.uid &&
                          incoming().keys().hasAll([
                            'userId', 'ownerName', 'businessName', 'currencySymbol',
@@ -409,7 +571,9 @@ service cloud.firestore {
                            'userId', 'ownerName', 'ownerEmail', 'businessName', 'gstin',
                            'address', 'state', 'pincode',
                            'currencySymbol', 'fiscalYearLabel', 'businessType',
-                           'monthlySalesTarget', 'profileMode', 'createdAt', 'updatedAt'
+                           'monthlySalesTarget', 'profileMode',
+                           'planTier', 'billingCycle', 'trialStartedAtMs', 'planExpiresAtMs', 'planAmountPaid',
+                           'createdAt', 'updatedAt'
                          ]) &&
                          isValidProfileSlot(incoming(), profileId);
 
@@ -423,7 +587,9 @@ service cloud.firestore {
                            'ownerName', 'ownerEmail', 'businessName', 'gstin',
                            'address', 'state', 'pincode',
                            'currencySymbol', 'fiscalYearLabel', 'businessType',
-                           'monthlySalesTarget', 'updatedAt'
+                           'monthlySalesTarget',
+                           'planTier', 'billingCycle', 'trialStartedAtMs', 'planExpiresAtMs', 'planAmountPaid',
+                           'updatedAt'
                          ]);
 
         allow delete: if isOwner(userId) && profileId in ['main_2', 'plain_1'];
@@ -551,42 +717,24 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          (
-                           isOwner(userId) ||
                            (
-                             isActiveSalesmanFor(userId) &&
-                             isExistingDocProfileAllowed(userId) &&
+                             isOwner(userId) &&
                              (
-                               (
-                                 salesmanPerms().canManageParties == true &&
-                                 incoming().diff(existing()).affectedKeys().hasOnly([
-                                   'name', 'partyType', 'phone', 'gstin',
-                                   'address', 'state', 'pincode',
-                                   'openingDue', 'creditLimit', 'notes', 'updatedAt'
-                                 ])
-                               ) ||
-                               (
-                                 (
-                                   salesmanPerms().canManageParties == true ||
-                                   salesmanPerms().canCreateInvoices == true ||
-                                   salesmanPerms().canEditDeleteInvoices == true ||
-                                   salesmanPerms().canManageStock == true
-                                 ) &&
-                                 incoming().diff(existing()).affectedKeys().hasOnly([
-                                   'totalBilled', 'totalPaid', 'updatedAt'
-                                 ])
-                               )
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'name', 'partyType', 'phone', 'gstin',
+                                 'address', 'state', 'pincode',
+                                 'openingDue', 'creditLimit', 'notes', 'updatedAt'
+                               ]) ||
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'totalBilled', 'totalPaid', 'updatedAt'
+                               ])
                              )
+                           ) ||
+                           (
+                             (hasVerifiedPhoneToken() || hasSalesmanSession()) &&
+                             exists(phoneAccessPath()) &&
+                             canSalesmanUpdatePartyWithGrant(userId, get(phoneAccessPath()).data)
                            )
-                         ) &&
-                         (
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'name', 'partyType', 'phone', 'gstin',
-                             'address', 'state', 'pincode',
-                             'openingDue', 'creditLimit', 'notes', 'updatedAt'
-                           ]) ||
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'totalBilled', 'totalPaid', 'updatedAt'
-                           ])
                          );
 
         allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageParties') && isExistingDocProfileAllowed(userId))) && isValidId(partyId);
@@ -628,49 +776,27 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          (
-                           isOwner(userId) ||
                            (
-                             isActiveSalesmanFor(userId) &&
-                             isExistingDocProfileAllowed(userId) &&
+                             isOwner(userId) &&
                              (
-                               (
-                                 salesmanPerms().canManageStock == true &&
-                                 (
-                                   incoming().diff(existing()).affectedKeys().hasOnly([
-                                     'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
-                                     'purchasePrice', 'gstRatePercent', 'stockQty',
-                                     'lowStockThreshold', 'updatedAt'
-                                   ]) ||
-                                   incoming().diff(existing()).affectedKeys().hasOnly([
-                                     'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
-                                   ])
-                                 )
-                               ) ||
-                               (
-                                 (
-                                   salesmanPerms().canManageStock == true ||
-                                   salesmanPerms().canCreateInvoices == true ||
-                                   salesmanPerms().canEditDeleteInvoices == true
-                                 ) &&
-                                 incoming().diff(existing()).affectedKeys().hasOnly([
-                                   'stockQty', 'updatedAt'
-                                 ])
-                               )
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
+                                 'purchasePrice', 'gstRatePercent', 'stockQty',
+                                 'lowStockThreshold', 'updatedAt'
+                               ]) ||
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
+                               ]) ||
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'stockQty', 'updatedAt'
+                               ])
                              )
+                           ) ||
+                           (
+                             (hasVerifiedPhoneToken() || hasSalesmanSession()) &&
+                             exists(phoneAccessPath()) &&
+                             canSalesmanUpdateInventoryWithGrant(userId, get(phoneAccessPath()).data)
                            )
-                         ) &&
-                         (
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'name', 'sku', 'hsnCode', 'category', 'unit', 'salePrice',
-                             'purchasePrice', 'gstRatePercent', 'stockQty',
-                             'lowStockThreshold', 'updatedAt'
-                           ]) ||
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'stockQty', 'purchasePrice', 'hsnCode', 'updatedAt'
-                           ]) ||
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'stockQty', 'updatedAt'
-                           ])
                          );
 
         allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageStock') && isExistingDocProfileAllowed(userId))) && isValidId(itemId);
@@ -696,9 +822,10 @@ service cloud.firestore {
                          salesmanPerms().canViewReports == true
                        ));
 
-        allow create: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canCreateInvoices') && isProfileAllowedForSalesman(incoming()))) &&
+        allow create: if (isOwner(userId) || canSalesmanWriteProfileDoc(userId, 'canCreateInvoices', incoming())) &&
                          isValidId(invoiceId) &&
                          incoming().userId == userId &&
+                         (!hasPopulatedEInvoiceOrEWayBill(incoming()) || isPlanAllowedForEInvoiceAndEWayBill(userId)) &&
                          incoming().keys().hasAll([
                            'userId', 'invoiceNumber', 'partyId', 'partyName', 'partyGstin',
                            'invoiceType', 'taxMode', 'paymentMethod', 'status',
@@ -710,11 +837,17 @@ service cloud.firestore {
                            'partyAddress', 'partyState', 'partyPincode',
                            'invoiceType', 'taxMode', 'paymentMethod', 'status',
                            'subtotal', 'gstTotal', 'discountAmount', 'grandTotal',
-                           'paidAmount', 'notes', 'lineItems', 'createdAt', 'updatedAt'
+                           'paidAmount', 'notes', 'lineItems',
+                           'irn', 'ackNo', 'ackDate', 'signedQrData', 'einvoiceStatus',
+                           'ewbNumber', 'ewbDate', 'ewbValidUntil', 'transportMode', 'distanceKm',
+                           'fromPlace', 'fromPincode', 'toPlace', 'toPincode',
+                           'vehicleNumber', 'vehicleType', 'transporterName', 'transporterId',
+                           'transporterDocNo', 'transporterDocDate',
+                           'createdAt', 'updatedAt'
                          ]) &&
                          isValidGstInvoice(incoming());
 
-        allow update: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canEditDeleteInvoices') && isExistingDocProfileAllowed(userId))) &&
+        allow update: if (isOwner(userId) || canSalesmanWriteProfileDoc(userId, 'canEditDeleteInvoices', existing())) &&
                          isValidId(invoiceId) &&
                          isValidGstInvoice(incoming()) &&
                          incoming().userId == existing().userId &&
@@ -730,14 +863,20 @@ service cloud.firestore {
                                'paidAmount', 'status', 'paymentMethod', 'updatedAt'
                              ])
                            ) ||
-                           // Action: Edit full invoice (items, customer, tax mode, discount, notes)
+                           // Action: Edit invoice or generate/update GST Portal E-Invoice (IRN/QR) & E-Way Bill details
                            (
+                             (!hasPopulatedEInvoiceOrEWayBill(incoming()) || (isPlanAllowedForEInvoiceAndEWayBill(userId) && incoming().taxMode != 'none')) &&
                              incoming().diff(existing()).affectedKeys().hasOnly([
                                'invoiceNumber', 'partyId', 'partyName', 'partyGstin',
                                'partyAddress', 'partyState', 'partyPincode',
                                'invoiceType', 'taxMode', 'paymentMethod', 'status',
                                'subtotal', 'gstTotal', 'discountAmount', 'grandTotal',
-                               'paidAmount', 'notes', 'lineItems', 'updatedAt'
+                               'paidAmount', 'notes', 'lineItems',
+                               'irn', 'ackNo', 'ackDate', 'signedQrData', 'einvoiceStatus',
+                               'ewbNumber', 'ewbDate', 'ewbValidUntil', 'transportMode', 'distanceKm',
+                               'fromPlace', 'fromPincode', 'toPlace', 'toPincode',
+                               'vehicleNumber', 'vehicleType', 'transporterName', 'transporterId',
+                               'transporterDocNo', 'transporterDocDate', 'updatedAt'
                              ]) &&
                              (
                                existing().status != 'paid' ||
@@ -748,7 +887,7 @@ service cloud.firestore {
                            )
                          );
 
-        allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canEditDeleteInvoices') && isExistingDocProfileAllowed(userId))) && isValidId(invoiceId);
+        allow delete: if (isOwner(userId) || canSalesmanWriteProfileDoc(userId, 'canEditDeleteInvoices', existing())) && isValidId(invoiceId);
       }
 
       match /expenses/{expenseId} {
@@ -798,7 +937,6 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          (
-                           // Action: Settle pending expense
                            (
                              existing().status == 'pending' &&
                              incoming().status == 'settled' &&
@@ -806,12 +944,14 @@ service cloud.firestore {
                                'status', 'paymentMethod', 'updatedAt'
                              ])
                            ) ||
-                           // Action: Edit expense details
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'title', 'category', 'paymentMethod', 'status',
-                             'partyId', 'partyName', 'referenceNo', 'amount',
-                             'gstInputAmount', 'notes', 'updatedAt'
-                           ])
+                           (
+                             existing().status == 'pending' &&
+                             incoming().diff(existing()).affectedKeys().hasOnly([
+                               'title', 'category', 'paymentMethod', 'status',
+                               'partyId', 'partyName', 'referenceNo', 'amount',
+                               'gstInputAmount', 'notes', 'updatedAt'
+                             ])
+                           )
                          );
 
         allow delete: if (isOwner(userId) || (hasSalesmanPermission(userId, 'canManageExpenses') && isExistingDocProfileAllowed(userId))) && isValidId(expenseId);

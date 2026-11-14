@@ -90,6 +90,7 @@ fun PartiesModuleContent(
   showAddPartyDialog: Boolean,
   onDismissAddPartyDialog: () -> Unit,
   onOpenAddPartyDialog: () -> Unit,
+  canManageParties: Boolean = true,
 ) {
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var typeFilter by rememberSaveable { mutableStateOf("all") }
@@ -202,8 +203,8 @@ fun PartiesModuleContent(
                 if (parties.isEmpty())
                   "Add customers and suppliers to track GSTIN, credit limits, and running Khata dues."
                 else "Try adjusting your search or filter.",
-              actionLabel = "Add Party",
-              onAction = onOpenAddPartyDialog,
+              actionLabel = if (canManageParties) "Add Party" else null,
+              onAction = if (canManageParties) onOpenAddPartyDialog else null,
             )
           }
         } else {
@@ -211,6 +212,7 @@ fun PartiesModuleContent(
             PartyLedgerCard(
               party = party,
               currency = currency,
+              canManageParties = canManageParties,
               onRecordPayment = { paymentParty = party },
               onEdit = { editingParty = party },
               onDelete = { onDeleteParty(party.id) },
@@ -270,6 +272,7 @@ fun PartiesModuleContent(
 private fun PartyLedgerCard(
   party: ErpParty,
   currency: String,
+  canManageParties: Boolean = true,
   onRecordPayment: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
@@ -373,24 +376,26 @@ private fun PartyLedgerCard(
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          if (balance > 0.0) {
-            TextButton(onClick = onRecordPayment) {
-              Icon(Icons.Filled.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Settle")
+        if (canManageParties) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            if (balance > 0.0) {
+              TextButton(onClick = onRecordPayment) {
+                Icon(Icons.Filled.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Settle")
+              }
             }
-          }
-          IconButton(onClick = onEdit) {
-            Icon(Icons.Filled.Edit, contentDescription = "Edit party", modifier = Modifier.size(18.dp))
-          }
-          IconButton(onClick = onDelete) {
-            Icon(
-              Icons.Filled.DeleteOutline,
-              contentDescription = "Delete party",
-              tint = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.size(18.dp),
-            )
+            IconButton(onClick = onEdit) {
+              Icon(Icons.Filled.Edit, contentDescription = "Edit party", modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onDelete) {
+              Icon(
+                Icons.Filled.DeleteOutline,
+                contentDescription = "Delete party",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+              )
+            }
           }
         }
       }
@@ -664,8 +669,8 @@ fun ModuleEmptyCard(
   icon: androidx.compose.ui.graphics.vector.ImageVector,
   title: String,
   subtitle: String,
-  actionLabel: String,
-  onAction: () -> Unit,
+  actionLabel: String? = null,
+  onAction: (() -> Unit)? = null,
 ) {
   Card(
     shape = MaterialTheme.shapes.large,
@@ -684,11 +689,13 @@ fun ModuleEmptyCard(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
-      Spacer(modifier = Modifier.height(4.dp))
-      Button(onClick = onAction) {
-        Icon(Icons.Filled.Add, contentDescription = null)
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(actionLabel)
+      if (actionLabel != null && onAction != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Button(onClick = onAction) {
+          Icon(Icons.Filled.Add, contentDescription = null)
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(actionLabel)
+        }
       }
     }
   }

@@ -32,11 +32,14 @@ import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -77,6 +80,10 @@ import com.example.data.model.ErpParty
 import com.example.data.model.GstInvoice
 import com.example.data.model.InventoryItem
 import com.example.data.model.InvoiceLineItem
+import com.example.data.model.SubscriptionStatus
+import com.example.data.model.SubscriptionTier
+import com.example.data.reference.EInvoiceGenerationResult
+import com.example.data.reference.EWayBillGenerationResult
 import com.example.data.reference.IndiaStates
 import com.example.data.sync.ErpAppSettings
 import com.example.ui.theme.MonoMetricMedium
@@ -145,6 +152,15 @@ fun BillingModuleContent(
   showNewInvoiceDialog: Boolean,
   onDismissNewInvoiceDialog: () -> Unit,
   onOpenNewInvoiceDialog: () -> Unit,
+  canCreateInvoices: Boolean = true,
+  canEditDeleteInvoices: Boolean = true,
+  canPrintInvoices: Boolean = true,
+  canRecordPayments: Boolean = true,
+  subscriptionStatus: SubscriptionStatus = SubscriptionStatus.fromProfile(profile),
+  onSaveEInvoice: (GstInvoice, EInvoiceGenerationResult) -> Unit = { _, _ -> },
+  onCancelEInvoice: (GstInvoice) -> Unit = {},
+  onSaveEWayBill: (GstInvoice, EWayBillGenerationResult) -> Unit = { _, _ -> },
+  onOpenSubscriptionPlans: () -> Unit = {},
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
@@ -157,6 +173,29 @@ fun BillingModuleContent(
   var invoicePendingPdfExport by remember { mutableStateOf<GstInvoice?>(null) }
   var pendingPdfOptions by remember { mutableStateOf(InvoicePrintOptions.fromSettings(appSettings)) }
   var pendingPrintOrPdfRequest by remember { mutableStateOf<Pair<GstInvoice, Boolean>?>(null) }
+  var invoiceForEInvoiceSheet by remember { mutableStateOf<GstInvoice?>(null) }
+  var invoiceForEWayBillSheet by remember { mutableStateOf<GstInvoice?>(null) }
+  var upgradeDialogFeature by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+  val openEInvoiceFor: (GstInvoice) -> Unit = { inv ->
+    if (!subscriptionStatus.allowsEInvoiceAndEWayBill) {
+      upgradeDialogFeature =
+        "GST Portal E-Invoice (IRN & Signed QR)" to
+          "1-Click GST Portal E-Invoice (IRN) & Signed QR Code generation is available in the 30-Day Free Trial and Diamond Plan (₹700/mo or ₹6,720/yr with 20% Yearly Discount)."
+    } else {
+      invoiceForEInvoiceSheet = inv
+    }
+  }
+
+  val openEWayBillFor: (GstInvoice) -> Unit = { inv ->
+    if (!subscriptionStatus.allowsEInvoiceAndEWayBill) {
+      upgradeDialogFeature =
+        "GST E-Way Bill & Transport Module" to
+          "E-Way Bill generation with City/PIN Distance (KM), Vehicle No., and Transporter details is available in the 30-Day Free Trial and Diamond Plan (₹700/mo or ₹6,720/yr with 20% Yearly Discount)."
+    } else {
+      invoiceForEWayBillSheet = inv
+    }
+  }
 
   val downloadPdfLauncher =
     rememberLauncherForActivityResult(
@@ -320,8 +359,11 @@ fun BillingModuleContent(
                   else
                     "Create your first GST tax invoice or POS bill with automatic stock deduction and Khata sync."
                 } else "Try adjusting your search or payment status filter.",
-              actionLabel = if (isPlainNonGst) "New Plain Bill" else "New GST Bill",
-              onAction = onOpenNewInvoiceDialog,
+              actionLabel =
+                if (canCreateInvoices) {
+                  if (isPlainNonGst) "New Plain Bill" else "New GST Bill"
+                } else null,
+              onAction = if (canCreateInvoices) onOpenNewInvoiceDialog else null,
             )
           }
         } else {
@@ -330,11 +372,15 @@ fun BillingModuleContent(
               invoice = invoice,
               currency = currency,
               isPlainNonGst = isPlainNonGst,
+              canPrint = canPrintInvoices,
+              canEditDelete = canEditDeleteInvoices,
               onClick = { selectedInvoice = invoice },
               onPrint = { triggerPrintInvoice(invoice) },
               onDownloadPdf = { triggerDownloadPdf(invoice) },
               onEdit = { editingInvoice = invoice },
               onDelete = { invoicePendingDelete = invoice },
+              onOpenEInvoice = { openEInvoiceFor(invoice) },
+              onOpenEWayBill = { openEWayBillFor(invoice) },
             )
           }
         }
@@ -421,6 +467,9 @@ fun BillingModuleContent(
       profile = profile,
       currency = currency,
       isPlainNonGst = isPlainNonGst,
+      canPrint = canPrintInvoices,
+      canEditDelete = canEditDeleteInvoices,
+      canRecordPayments = canRecordPayments,
       isBusy = isBusy,
       onDismiss = { selectedInvoice = null },
       onPrint = { triggerPrintInvoice(liveSelected) },
@@ -435,6 +484,57 @@ fun BillingModuleContent(
       onDelete = {
         invoicePendingDelete = liveSelected
       },
+      onOpenEInvoice = { openEInvoiceFor(liveSelected) },
+      onOpenEWayBill = { openEWayBillFor(liveSelected) },
+    )
+  }
+
+  val liveEInvoiceTarget =
+    invoiceForEInvoiceSheet?.let { current -> invoices.firstOrNull { it.id == current.id } ?: current }
+  if (liveEInvoiceTarget != null) {
+    GenerateEInvoiceSheet(
+      invoice = liveEInvoiceTarget,
+      sellerProfile = profile,
+      appSettings = appSettings,
+      onSaveEInvoice = { result ->
+        onSaveEInvoice(liveEInvoiceTarget, result)
+      },
+      onCancelEInvoice = {
+        onCancelEInvoice(liveEInvoiceTarget)
+      },
+      onOpenEWayBillGenerator = {
+        invoiceForEInvoiceSheet = null
+        openEWayBillFor(liveEInvoiceTarget)
+      },
+      onDismiss = { invoiceForEInvoiceSheet = null },
+    )
+  }
+
+  val liveEWayBillTarget =
+    invoiceForEWayBillSheet?.let { current -> invoices.firstOrNull { it.id == current.id } ?: current }
+  if (liveEWayBillTarget != null) {
+    GenerateEWayBillSheet(
+      invoice = liveEWayBillTarget,
+      sellerProfile = profile,
+      appSettings = appSettings,
+      onSaveEWayBill = { result ->
+        onSaveEWayBill(liveEWayBillTarget, result)
+      },
+      onDismiss = { invoiceForEWayBillSheet = null },
+    )
+  }
+
+  upgradeDialogFeature?.let { (featureTitle, featureDesc) ->
+    UpgradePlanRequiredDialog(
+      featureTitle = featureTitle,
+      featureDescription = featureDesc,
+      currentPlanLabel = subscriptionStatus.topBarBadgeText,
+      recommendedTier = SubscriptionTier.DIAMOND,
+      onViewPlans = {
+        upgradeDialogFeature = null
+        onOpenSubscriptionPlans()
+      },
+      onDismiss = { upgradeDialogFeature = null },
     )
   }
 
@@ -482,11 +582,15 @@ private fun InvoiceListCard(
   invoice: GstInvoice,
   currency: String,
   isPlainNonGst: Boolean,
+  canPrint: Boolean = true,
+  canEditDelete: Boolean = true,
   onClick: () -> Unit,
   onPrint: () -> Unit,
   onDownloadPdf: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
+  onOpenEInvoice: () -> Unit = {},
+  onOpenEWayBill: () -> Unit = {},
 ) {
   val (statusLabel, bg, fg) =
     when (invoice.status) {
@@ -572,6 +676,51 @@ private fun InvoiceListCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
           )
+          if (!isPlainNonGst && (invoice.hasEInvoice || invoice.hasEWayBill)) {
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.padding(top = 2.dp),
+            ) {
+              if (invoice.hasEInvoice) {
+                Surface(
+                  color = MaterialTheme.colorScheme.primaryContainer,
+                  shape = RoundedCornerShape(50),
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                  ) {
+                    Icon(
+                      imageVector = Icons.Filled.Verified,
+                      contentDescription = null,
+                      tint = MaterialTheme.colorScheme.primary,
+                      modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                      text = "IRN Verified",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                  }
+                }
+              }
+              if (invoice.hasEWayBill) {
+                Surface(
+                  color = MaterialTheme.colorScheme.tertiaryContainer,
+                  shape = RoundedCornerShape(50),
+                ) {
+                  Text(
+                    text = "EWB #${invoice.ewbNumber} (${invoice.distanceKm} KM)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                  )
+                }
+              }
+            }
+          }
         }
         Column(horizontalAlignment = Alignment.End) {
           Text(
@@ -589,49 +738,72 @@ private fun InvoiceListCard(
         }
       }
 
-      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+      if (canPrint || canEditDelete) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        TextButton(
-          onClick = onPrint,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_print_${invoice.invoiceNumber}"),
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Print")
-        }
-        TextButton(
-          onClick = onDownloadPdf,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_pdf_${invoice.invoiceNumber}"),
-        ) {
-          Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("PDF")
-        }
-        TextButton(
-          onClick = onEdit,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_edit_${invoice.invoiceNumber}"),
-        ) {
-          Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Edit")
-        }
-        TextButton(
-          onClick = onDelete,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_delete_${invoice.invoiceNumber}"),
-        ) {
-          Icon(
-            Icons.Filled.DeleteOutline,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(16.dp),
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Delete", color = MaterialTheme.colorScheme.error)
+          if (canPrint) {
+            TextButton(
+              onClick = onPrint,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_print_${invoice.invoiceNumber}"),
+            ) {
+              Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Print")
+            }
+            TextButton(
+              onClick = onDownloadPdf,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_pdf_${invoice.invoiceNumber}"),
+            ) {
+              Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("PDF")
+            }
+          }
+          if (!isPlainNonGst && invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
+            TextButton(
+              onClick = onOpenEInvoice,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_einvoice_${invoice.invoiceNumber}"),
+            ) {
+              Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(if (invoice.hasEInvoice) "IRN ✓" else "E-Invoice")
+            }
+            TextButton(
+              onClick = onOpenEWayBill,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_ewaybill_${invoice.invoiceNumber}"),
+            ) {
+              Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(if (invoice.hasEWayBill) "EWB ✓" else "E-Way Bill")
+            }
+          } else if (canEditDelete) {
+            TextButton(
+              onClick = onEdit,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_edit_${invoice.invoiceNumber}"),
+            ) {
+              Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Edit")
+            }
+            TextButton(
+              onClick = onDelete,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_delete_${invoice.invoiceNumber}"),
+            ) {
+              Icon(
+                Icons.Filled.DeleteOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(16.dp),
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+          }
         }
       }
     }
@@ -1228,6 +1400,9 @@ private fun InvoiceDetailSheet(
   profile: BusinessProfile?,
   currency: String,
   isPlainNonGst: Boolean = false,
+  canPrint: Boolean = true,
+  canEditDelete: Boolean = true,
+  canRecordPayments: Boolean = true,
   isBusy: Boolean,
   onDismiss: () -> Unit,
   onPrint: () -> Unit,
@@ -1235,6 +1410,8 @@ private fun InvoiceDetailSheet(
   onEdit: () -> Unit,
   onRecordPayment: (amount: Double, method: String) -> Unit,
   onDelete: () -> Unit,
+  onOpenEInvoice: () -> Unit = {},
+  onOpenEWayBill: () -> Unit = {},
 ) {
   val context = LocalContext.current
   var showPayControls by remember { mutableStateOf(false) }
@@ -1283,46 +1460,118 @@ private fun InvoiceDetailSheet(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        OutlinedButton(
-          onClick = onPrint,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_print_button"),
-        ) {
-          Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(17.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Print")
+        if (canPrint) {
+          OutlinedButton(
+            onClick = onPrint,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_print_button"),
+          ) {
+            Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Print")
+          }
+          OutlinedButton(
+            onClick = onDownloadPdf,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_pdf_button"),
+          ) {
+            Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Save PDF")
+          }
         }
-        OutlinedButton(
-          onClick = onDownloadPdf,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_pdf_button"),
-        ) {
-          Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(17.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Save PDF")
+        if (!isPlainNonGst && invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
+          OutlinedButton(
+            onClick = onOpenEInvoice,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_einvoice_button"),
+          ) {
+            Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (invoice.hasEInvoice) "E-Invoice (IRN ✓)" else "Generate E-Invoice")
+          }
+          OutlinedButton(
+            onClick = onOpenEWayBill,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_ewaybill_button"),
+          ) {
+            Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (invoice.hasEWayBill) "E-Way Bill (#${invoice.ewbNumber})" else "Generate E-Way Bill")
+          }
         }
-        OutlinedButton(
-          onClick = onEdit,
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_edit_button"),
-        ) {
-          Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(17.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Edit")
+        if (canEditDelete) {
+          OutlinedButton(
+            onClick = onEdit,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_edit_button"),
+          ) {
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Edit")
+          }
         }
-        OutlinedButton(
-          onClick = {
-            val summaryText = buildShareableReceipt(invoice, profile, currency, isPlainNonGst)
-            val sendIntent =
-              Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "Invoice ${invoice.invoiceNumber}")
-                putExtra(Intent.EXTRA_TEXT, summaryText)
+        if (canPrint) {
+          OutlinedButton(
+            onClick = {
+              val summaryText = buildShareableReceipt(invoice, profile, currency, isPlainNonGst)
+              val sendIntent =
+                Intent(Intent.ACTION_SEND).apply {
+                  type = "text/plain"
+                  putExtra(Intent.EXTRA_SUBJECT, "Invoice ${invoice.invoiceNumber}")
+                  putExtra(Intent.EXTRA_TEXT, summaryText)
+                }
+              context.startActivity(Intent.createChooser(sendIntent, "Share Invoice"))
+            },
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_share_button"),
+          ) {
+            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Share")
+          }
+        }
+      }
+
+      if (!isPlainNonGst && (invoice.hasEInvoice || invoice.hasEWayBill)) {
+        Surface(
+          color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+          shape = MaterialTheme.shapes.medium,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            if (invoice.hasEInvoice) {
+              SignedQrCodeMatrixBox(
+                qrPayload = invoice.signedQrData.ifBlank { invoice.irn },
+                modifier = Modifier.size(72.dp),
+              )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+              if (invoice.hasEInvoice) {
+                Text(
+                  text = "E-Invoice Ack #${invoice.ackNo} • ${invoice.ackDate}",
+                  style = MaterialTheme.typography.labelLarge,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                  text = "IRN: ${invoice.irn}",
+                  style = MaterialTheme.typography.bodySmall,
+                  maxLines = 2,
+                )
               }
-            context.startActivity(Intent.createChooser(sendIntent, "Share Invoice"))
-          },
-          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_share_button"),
-        ) {
-          Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(17.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Share")
+              if (invoice.hasEWayBill) {
+                Text(
+                  text = "E-Way Bill #${invoice.ewbNumber} • ${invoice.distanceKm} KM (${invoice.transportMode.uppercase()})",
+                  style = MaterialTheme.typography.labelLarge,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.tertiary,
+                )
+                Text(
+                  text = "${invoice.fromPlace} (${invoice.fromPincode}) → ${invoice.toPlace} (${invoice.toPincode}) • Vehicle: ${invoice.vehicleNumber}",
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
+            }
+          }
         }
       }
 
@@ -1400,7 +1649,7 @@ private fun InvoiceDetailSheet(
         }
       }
 
-      if (invoice.status != GstInvoice.STATUS_PAID) {
+      if (invoice.status != GstInvoice.STATUS_PAID && canRecordPayments) {
         if (!showPayControls) {
           Button(
             onClick = { showPayControls = true },
@@ -1444,13 +1693,15 @@ private fun InvoiceDetailSheet(
         }
       }
 
-      TextButton(
-        onClick = onDelete,
-        modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).testTag("invoice_detail_delete_button"),
-      ) {
-        Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Delete Invoice", color = MaterialTheme.colorScheme.error)
+      if (canEditDelete) {
+        TextButton(
+          onClick = onDelete,
+          modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).testTag("invoice_detail_delete_button"),
+        ) {
+          Icon(Icons.Filled.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Delete Invoice", color = MaterialTheme.colorScheme.error)
+        }
       }
 
       Spacer(modifier = Modifier.height(16.dp))

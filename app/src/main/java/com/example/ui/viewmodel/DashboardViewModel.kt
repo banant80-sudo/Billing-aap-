@@ -11,8 +11,16 @@ import com.example.data.model.ErpParty
 import com.example.data.model.GstInvoice
 import com.example.data.model.InventoryItem
 import com.example.data.model.InvoiceLineItem
+import com.example.data.model.PhoneAccessGrant
+import com.example.data.model.SalesmanPermissions
+import com.example.data.model.SalesmanSeat
+import com.example.data.model.SubscriptionStatus
+import com.example.data.model.SubscriptionTier
+import com.example.data.reference.EInvoiceGenerationResult
+import com.example.data.reference.EWayBillGenerationResult
 import com.example.data.repository.ErpDashboardRepository
 import com.example.data.repository.ErpOperationsRepository
+import com.example.data.repository.TeamRepository
 import com.example.data.sync.ErpAppSettings
 import com.example.data.sync.ErpSettingsStore
 import com.example.data.sync.FinbossBackupPayload
@@ -81,6 +89,11 @@ class DashboardViewModel(
   private val syncPrefs: SyncPreferences? = null,
   private val settingsStore: ErpSettingsStore? = null,
   networkStatusFlow: Flow<Boolean>? = null,
+  private val teamRepository: TeamRepository? = null,
+  val workspaceOwnerUid: String = currentUserId,
+  val isSalesmanSession: Boolean = false,
+  val salesmanPhone: String? = null,
+  initialSalesmanGrant: PhoneAccessGrant? = null,
 ) : ViewModel() {
 
   private val fallbackSettingsFlow = MutableStateFlow(ErpAppSettings())
@@ -90,8 +103,94 @@ class DashboardViewModel(
   private val _isBusy = MutableStateFlow(false)
   val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
+  fun clearSalesmanSessionOnSignOut() {
+    syncPrefs?.setSalesmanSessionPhone(currentUserId, null)
+  }
+
+  val activeSalesmanGrant: StateFlow<PhoneAccessGrant?> =
+    if (isSalesmanSession && teamRepository != null && !salesmanPhone.isNullOrBlank()) {
+      teamRepository
+        .observeMyPhoneAccess(salesmanPhone)
+        .catch { emit(initialSalesmanGrant) }
+        .stateIn(
+          scope = viewModelScope,
+          started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+          initialValue = initialSalesmanGrant,
+        )
+    } else {
+      MutableStateFlow(initialSalesmanGrant).asStateFlow()
+    }
+
+  val effectivePermissions: StateFlow<SalesmanPermissions> =
+    activeSalesmanGrant
+      .map { grant ->
+        if (!isSalesmanSession) {
+          SalesmanPermissions.OWNER_FULL
+        } else {
+          grant?.permissions ?: SalesmanPermissions()
+        }
+      }
+      .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+        initialValue =
+          if (!isSalesmanSession) SalesmanPermissions.OWNER_FULL
+          else initialSalesmanGrant?.permissions ?: SalesmanPermissions(),
+      )
+
+  val allowedProfileIds: StateFlow<List<String>> =
+    activeSalesmanGrant
+      .map { grant ->
+        if (!isSalesmanSession) {
+          BusinessProfile.ALL_SLOTS
+        } else {
+          grant
+            ?.allowedProfiles
+            ?.filter { it in BusinessProfile.ALL_SLOTS }
+            ?.distinct()
+            ?.ifEmpty { listOf(BusinessProfile.SLOT_MAIN_1) }
+            ?: listOf(BusinessProfile.SLOT_MAIN_1)
+        }
+      }
+      .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+        initialValue =
+          if (!isSalesmanSession) BusinessProfile.ALL_SLOTS
+          else
+            initialSalesmanGrant
+              ?.allowedProfiles
+              ?.filter { it in BusinessProfile.ALL_SLOTS }
+              ?.distinct()
+              ?.ifEmpty { listOf(BusinessProfile.SLOT_MAIN_1) }
+              ?: listOf(BusinessProfile.SLOT_MAIN_1),
+      )
+
+  val salesmenState: StateFlow<UiState<List<SalesmanSeat>>> =
+    if (!isSalesmanSession && teamRepository != null) {
+      teamRepository
+        .observeSalesmen(workspaceOwnerUid)
+        .map<List<SalesmanSeat>, UiState<List<SalesmanSeat>>> { UiState.Success(it) }
+        .catch { error ->
+          emit(UiState.Error(unwrapFirestoreMessage(error, "Failed to load salesman seats")))
+        }
+        .stateIn(
+          viewModelScope,
+          SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+          UiState.Loading,
+        )
+    } else {
+      MutableStateFlow<UiState<List<SalesmanSeat>>>(UiState.Success(emptyList())).asStateFlow()
+    }
+
   private val _activeProfileId =
-    MutableStateFlow(syncPrefs?.getActiveProfileId(currentUserId) ?: BusinessProfile.SLOT_MAIN_1)
+    MutableStateFlow(
+      run {
+        val preferred = syncPrefs?.getActiveProfileId(currentUserId) ?: BusinessProfile.SLOT_MAIN_1
+        val initialAllowed = allowedProfileIds.value
+        if (preferred in initialAllowed) preferred else initialAllowed.firstOrNull() ?: BusinessProfile.SLOT_MAIN_1
+      }
+    )
   val activeProfileId: StateFlow<String> = _activeProfileId.asStateFlow()
 
   private val _isSyncingNow = MutableStateFlow(false)
@@ -138,11 +237,23 @@ class DashboardViewModel(
           ),
       )
 
-  val profilesState: StateFlow<UiState<List<BusinessProfile>>> =
+  private val rawProfilesState: StateFlow<UiState<List<BusinessProfile>>> =
     repository
       .observeBusinessProfiles()
       .map<List<BusinessProfile>, UiState<List<BusinessProfile>>> { UiState.Success(it) }
       .catch { error -> emit(UiState.Error(unwrapFirestoreMessage(error, "Failed to load business profiles"))) }
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
+
+  val profilesState: StateFlow<UiState<List<BusinessProfile>>> =
+    combine(rawProfilesState, allowedProfileIds) { state, allowed ->
+        when (state) {
+          is UiState.Success -> {
+            val filtered = state.data.filter { it.id in allowed }
+            UiState.Success(filtered)
+          }
+          else -> state
+        }
+      }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
 
   private val legacyProfileState: StateFlow<UiState<BusinessProfile?>> =
@@ -174,6 +285,18 @@ class DashboardViewModel(
         }
       }
       .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), UiState.Loading)
+
+  val subscriptionStatus: StateFlow<SubscriptionStatus> =
+    combine(legacyProfileState, profileState) { rootState, activeState ->
+        val rootProfile = (rootState as? UiState.Success)?.data
+        val activeProfile = (activeState as? UiState.Success)?.data
+        SubscriptionStatus.fromProfile(rootProfile ?: activeProfile)
+      }
+      .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+        initialValue = SubscriptionStatus.fromProfile(null),
+      )
 
   val modulesState: StateFlow<UiState<List<ErpModuleConfig>>> =
     repository
@@ -282,10 +405,22 @@ class DashboardViewModel(
       )
 
   init {
-    initializeWorkspace()
+    if (!isSalesmanSession) {
+      initializeWorkspace()
+    } else {
+      viewModelScope.launch {
+        allowedProfileIds.collect { allowed ->
+          val current = _activeProfileId.value
+          if (current !in allowed && allowed.isNotEmpty()) {
+            _activeProfileId.value = allowed.first()
+          }
+        }
+      }
+    }
   }
 
   fun initializeWorkspace() {
+    if (isSalesmanSession) return
     viewModelScope.launch {
       _isBusy.value = true
       yield()
@@ -302,12 +437,105 @@ class DashboardViewModel(
 
   fun switchActiveProfile(slotId: String) {
     if (slotId !in BusinessProfile.ALL_SLOTS) return
+    if (slotId !in allowedProfileIds.value) {
+      _statusBanner.value = "Access to this business profile is restricted by the owner"
+      return
+    }
     val profiles = (profilesState.value as? UiState.Success)?.data.orEmpty()
     val target = profiles.firstOrNull { it.id == slotId } ?: return
     _activeProfileId.value = slotId
     syncPrefs?.setActiveProfileId(currentUserId, slotId)
     val modeLabel = if (target.isPlainNonGst) "Plain Non-GST" else "Main GST"
     _statusBanner.value = "Switched to ${target.businessName} ($modeLabel)"
+  }
+
+  fun saveSalesmanSeat(
+    seatId: String,
+    existingSeat: SalesmanSeat?,
+    name: String,
+    rawPhoneE164: String,
+    roleLabel: String,
+    isActive: Boolean,
+    allowedProfiles: List<String>,
+    permissions: SalesmanPermissions,
+    onDone: () -> Unit = {},
+  ) {
+    val repo = teamRepository
+    if (isSalesmanSession || repo == null) {
+      _statusBanner.value = "Only the business owner can manage salesman accounts"
+      return
+    }
+    val allSeats = (salesmenState.value as? UiState.Success)?.data.orEmpty()
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res =
+        withContext(Dispatchers.IO) {
+          repo.saveSalesmanSeat(
+            ownerUid = workspaceOwnerUid,
+            seatId = seatId,
+            existingSeat = existingSeat,
+            allSeats = allSeats,
+            name = name,
+            rawPhoneE164 = rawPhoneE164,
+            roleLabel = roleLabel,
+            isActive = isActive,
+            allowedProfiles = allowedProfiles,
+            permissions = permissions,
+          )
+        }
+      _isBusy.value = false
+      res
+        .onSuccess {
+          _statusBanner.value =
+            if (existingSeat != null) "Updated salesman access for ${name.trim()}"
+            else "Added salesman ${name.trim()} (${rawPhoneE164.trim()})"
+          onDone()
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to save salesman account"
+        }
+    }
+  }
+
+  fun toggleSalesmanActive(seat: SalesmanSeat, isActive: Boolean) {
+    val repo = teamRepository
+    if (isSalesmanSession || repo == null) return
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res =
+        withContext(Dispatchers.IO) {
+          repo.toggleSalesmanActive(workspaceOwnerUid, seat, isActive)
+        }
+      _isBusy.value = false
+      res
+        .onSuccess {
+          val stateText = if (isActive) "activated" else "paused"
+          _statusBanner.value = "Salesman ${seat.name} $stateText"
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to update salesman status"
+        }
+    }
+  }
+
+  fun deleteSalesmanSeat(seat: SalesmanSeat) {
+    val repo = teamRepository
+    if (isSalesmanSession || repo == null) return
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res =
+        withContext(Dispatchers.IO) {
+          repo.deleteSalesmanSeat(workspaceOwnerUid, seat)
+        }
+      _isBusy.value = false
+      res
+        .onSuccess {
+          _statusBanner.value = "Removed salesman ${seat.name} (${seat.phoneNumber})"
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to remove salesman"
+        }
+    }
   }
 
   fun saveBusinessProfile(
@@ -407,6 +635,39 @@ class DashboardViewModel(
           onDone()
         }
         .onFailure { err -> _statusBanner.value = err.localizedMessage ?: "Failed to remove profile" }
+    }
+  }
+
+  fun activateSubscriptionPlan(
+    tier: SubscriptionTier,
+    billingCycle: String,
+    onDone: () -> Unit = {},
+  ) {
+    if (isSalesmanSession) {
+      _statusBanner.value = "Only the business owner can change subscription plans"
+      return
+    }
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res =
+        withContext(Dispatchers.IO) {
+          repository.activateSubscriptionPlan(tier, billingCycle)
+        }
+      _isBusy.value = false
+      res
+        .onSuccess {
+          val cycleLabel =
+            when (billingCycle.lowercase()) {
+              SubscriptionTier.CYCLE_YEARLY -> "Yearly"
+              SubscriptionTier.CYCLE_TRIAL -> "30-Day Free Trial"
+              else -> "Monthly"
+            }
+          _statusBanner.value = "${tier.displayName} ($cycleLabel) activated!"
+          onDone()
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to activate subscription plan"
+        }
     }
   }
 
@@ -818,6 +1079,65 @@ class DashboardViewModel(
       res
         .onSuccess { _statusBanner.value = "Invoice ${invoice.invoiceNumber} deleted" }
         .onFailure { err -> _statusBanner.value = err.localizedMessage ?: "Delete failed" }
+    }
+  }
+
+  fun saveInvoiceEInvoice(
+    invoice: GstInvoice,
+    result: EInvoiceGenerationResult,
+    onDone: () -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = operationsRepository.saveInvoiceEInvoiceDetails(invoice, result)
+      _isBusy.value = false
+      res
+        .onSuccess {
+          _statusBanner.value = "E-Invoice IRN & Signed QR generated for ${invoice.invoiceNumber}"
+          onDone()
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to generate E-Invoice IRN"
+        }
+    }
+  }
+
+  fun cancelInvoiceEInvoice(
+    invoice: GstInvoice,
+    onDone: () -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = operationsRepository.cancelInvoiceEInvoice(invoice)
+      _isBusy.value = false
+      res
+        .onSuccess {
+          _statusBanner.value = "E-Invoice IRN cancelled for ${invoice.invoiceNumber}"
+          onDone()
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to cancel E-Invoice"
+        }
+    }
+  }
+
+  fun saveInvoiceEWayBill(
+    invoice: GstInvoice,
+    result: EWayBillGenerationResult,
+    onDone: () -> Unit = {},
+  ) {
+    viewModelScope.launch {
+      _isBusy.value = true
+      val res = operationsRepository.saveInvoiceEWayBillDetails(invoice, result)
+      _isBusy.value = false
+      res
+        .onSuccess {
+          _statusBanner.value = "E-Way Bill #${result.ewbNumber} saved for ${invoice.invoiceNumber}"
+          onDone()
+        }
+        .onFailure { err ->
+          _statusBanner.value = err.localizedMessage ?: "Failed to save E-Way Bill"
+        }
     }
   }
 

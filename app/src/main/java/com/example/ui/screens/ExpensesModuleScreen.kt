@@ -105,6 +105,7 @@ fun ExpensesModuleContent(
   showAddExpenseDialog: Boolean,
   onDismissAddExpenseDialog: () -> Unit,
   onOpenAddExpenseDialog: () -> Unit,
+  canManageExpenses: Boolean = true,
 ) {
   var viewMode by rememberSaveable { mutableStateOf("expenses") } // "expenses" or "cashbook"
   var categoryFilter by rememberSaveable { mutableStateOf("all") }
@@ -329,8 +330,8 @@ fun ExpensesModuleContent(
                     else
                       "Log rent, payroll, utilities, or supplier purchases with GST input tax credit."
                   } else "Try adjusting your search or category filter.",
-                actionLabel = "Record Expense",
-                onAction = onOpenAddExpenseDialog,
+                actionLabel = if (canManageExpenses) "Record Expense" else null,
+                onAction = if (canManageExpenses) onOpenAddExpenseDialog else null,
               )
             }
           } else {
@@ -339,6 +340,7 @@ fun ExpensesModuleContent(
                 expense = exp,
                 currency = currency,
                 isPlainNonGst = isPlainNonGst,
+                canManageExpenses = canManageExpenses,
                 onSettle = { onMarkSettled(exp.id, exp.paymentMethod) },
                 onEdit = { editingExpense = exp },
                 onDelete = { onDeleteExpense(exp.id) },
@@ -355,8 +357,8 @@ fun ExpensesModuleContent(
             icon = Icons.Filled.AccountBalance,
             title = "Cashbook Is Empty",
             subtitle = "Settled bills, expenses, and cashbook entries automatically reconcile here.",
-            actionLabel = "Record Expense",
-            onAction = onOpenAddExpenseDialog,
+            actionLabel = if (canManageExpenses) "Record Expense" else null,
+            onAction = if (canManageExpenses) onOpenAddExpenseDialog else null,
           )
         }
       } else {
@@ -405,6 +407,7 @@ private fun ExpenseCard(
   expense: ErpExpense,
   currency: String,
   isPlainNonGst: Boolean,
+  canManageExpenses: Boolean = true,
   onSettle: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
@@ -487,28 +490,30 @@ private fun ExpenseCard(
         )
       }
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        if (isPending) {
-          TextButton(onClick = onSettle) {
-            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Mark Paid")
+      if (canManageExpenses) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (isPending) {
+            TextButton(onClick = onSettle) {
+              Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Mark Paid")
+            }
           }
-        }
-        IconButton(onClick = onEdit) {
-          Icon(Icons.Filled.Edit, contentDescription = "Edit expense", modifier = Modifier.size(18.dp))
-        }
-        IconButton(onClick = onDelete) {
-          Icon(
-            Icons.Filled.DeleteOutline,
-            contentDescription = "Delete expense",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
-          )
+          IconButton(onClick = onEdit) {
+            Icon(Icons.Filled.Edit, contentDescription = "Edit expense", modifier = Modifier.size(18.dp))
+          }
+          IconButton(onClick = onDelete) {
+            Icon(
+              Icons.Filled.DeleteOutline,
+              contentDescription = "Delete expense",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(18.dp),
+            )
+          }
         }
       }
     }

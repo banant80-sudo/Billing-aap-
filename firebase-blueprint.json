@@ -2,7 +2,7 @@
   "entities": {
     "BusinessProfile": {
       "title": "BusinessProfile",
-      "description": "Authenticated user's Finboss ERP workspace profile, currency, tax ID, and monthly revenue target.",
+      "description": "Authenticated user's Finboss ERP workspace profile, currency, tax ID, subscription plan/trial status, and monthly revenue target.",
       "type": "object",
       "properties": {
         "userId": {
@@ -43,6 +43,28 @@
         "monthlySalesTarget": {
           "type": "number",
           "description": "Target monthly revenue used for dashboard KPI progress."
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["trial", "silver", "gold", "diamond"],
+          "description": "Subscription tier: 30-day free trial (full access), Silver (₹300/mo), Gold (₹500/mo, 10% yearly discount), or Diamond (₹700/mo, 20% yearly discount)."
+        },
+        "billingCycle": {
+          "type": "string",
+          "enum": ["trial", "monthly", "yearly"],
+          "description": "Billing cycle for the active subscription plan."
+        },
+        "trialStartedAtMs": {
+          "type": "number",
+          "description": "Epoch milliseconds when the 30-day free trial started."
+        },
+        "planExpiresAtMs": {
+          "type": "number",
+          "description": "Epoch milliseconds when the active trial or subscription period expires."
+        },
+        "planAmountPaid": {
+          "type": "number",
+          "description": "Amount in INR for the active subscription cycle."
         },
         "createdAt": {
           "type": "string",
@@ -85,6 +107,11 @@
         "businessType": { "type": "string" },
         "monthlySalesTarget": { "type": "number" },
         "profileMode": { "type": "string", "enum": ["main_gst", "plain_non_gst"] },
+        "planTier": { "type": "string", "enum": ["trial", "silver", "gold", "diamond"] },
+        "billingCycle": { "type": "string", "enum": ["trial", "monthly", "yearly"] },
+        "trialStartedAtMs": { "type": "number" },
+        "planExpiresAtMs": { "type": "number" },
+        "planAmountPaid": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -233,7 +260,7 @@
     },
     "GstInvoice": {
       "title": "GstInvoice",
-      "description": "GST tax invoice or POS bill with bounded line items, tax split, and payment status.",
+      "description": "GST tax invoice or POS bill with bounded line items, tax split, payment status, GST Portal E-Invoice (IRN/QR), and E-Way Bill transport details.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -256,6 +283,26 @@
         "paidAmount": { "type": "number" },
         "notes": { "type": "string" },
         "lineItems": { "type": "array" },
+        "irn": { "type": "string", "description": "64-character SHA-256 hex Invoice Reference Number from GST IRP." },
+        "ackNo": { "type": "string", "description": "IRP Acknowledgement Number." },
+        "ackDate": { "type": "string", "description": "IRP Acknowledgement Date & Time." },
+        "signedQrData": { "type": "string", "description": "Signed E-Invoice QR Code payload." },
+        "einvoiceStatus": { "type": "string", "enum": ["", "generated", "cancelled"] },
+        "ewbNumber": { "type": "string", "description": "12-digit GST E-Way Bill Number." },
+        "ewbDate": { "type": "string" },
+        "ewbValidUntil": { "type": "string" },
+        "transportMode": { "type": "string", "enum": ["", "road", "rail", "air", "ship"] },
+        "distanceKm": { "type": "integer" },
+        "fromPlace": { "type": "string" },
+        "fromPincode": { "type": "string" },
+        "toPlace": { "type": "string" },
+        "toPincode": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "vehicleType": { "type": "string", "enum": ["", "regular", "odc"] },
+        "transporterName": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "transporterDocNo": { "type": "string" },
+        "transporterDocDate": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -382,12 +429,25 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "SalesmanSession": {
+      "title": "SalesmanSession",
+      "description": "Authenticated session binding linking a salesman UID to their verified E.164 mobile number and Owner workspace.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "seatId": { "type": "string", "enum": ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "phoneNumber", "ownerUid", "seatId", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/BusinessProfile" },
-      "description": "Per-user primary business profile fallback."
+      "description": "Per-user primary business profile fallback and subscription plan state."
     },
     "/users/{userId}/business_profiles/{profileId}": {
       "schema": { "$ref": "#/entities/BusinessProfileAccount" },
@@ -411,7 +471,7 @@
     },
     "/users/{userId}/invoices/{invoiceId}": {
       "schema": { "$ref": "#/entities/GstInvoice" },
-      "description": "User's GST tax invoices and POS bills."
+      "description": "User's GST tax invoices, POS bills, E-Invoices, and E-Way Bills."
     },
     "/users/{userId}/expenses/{expenseId}": {
       "schema": { "$ref": "#/entities/ErpExpense" },
@@ -423,7 +483,11 @@
     },
     "/phone_access/{phoneNumber}": {
       "schema": { "$ref": "#/entities/PhoneAccessGrant" },
-      "description": "E.164 phone-keyed access grant resolved by Phone-OTP authenticated salesmen."
+      "description": "E.164 phone-keyed access grant resolved by OTP-authenticated salesmen."
+    },
+    "/salesman_sessions/{sessionUid}": {
+      "schema": { "$ref": "#/entities/SalesmanSession" },
+      "description": "Per-UID active salesman session binding verified against /phone_access/{phoneNumber}."
     }
   }
 }

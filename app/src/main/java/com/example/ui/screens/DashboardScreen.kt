@@ -40,6 +40,7 @@ import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
@@ -50,10 +51,12 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PendingActions
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
@@ -119,6 +122,12 @@ import com.example.data.model.BusinessProfile
 import com.example.data.model.DashboardEntry
 import com.example.data.model.ErpModuleConfig
 import com.example.data.model.GstInvoice
+import com.example.data.model.PhoneAccessGrant
+import com.example.data.model.SalesmanPermissions
+import com.example.data.model.SalesmanSeat
+import com.example.data.model.SalesmanSeatConfig
+import com.example.data.model.SubscriptionStatus
+import com.example.data.model.SubscriptionTier
 import com.example.data.sync.ErpAppSettings
 import com.example.data.sync.FinbossBackupPayload
 import com.example.ui.theme.MonoMetricLarge
@@ -179,6 +188,35 @@ fun DashboardScreen(
   val appSettings by viewModel.appSettings.collectAsStateWithLifecycle()
   val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
   val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
+  val effectivePermissions by viewModel.effectivePermissions.collectAsStateWithLifecycle()
+  val allowedProfileIds by viewModel.allowedProfileIds.collectAsStateWithLifecycle()
+  val salesmenState by viewModel.salesmenState.collectAsStateWithLifecycle()
+  val activeSalesmanGrant by viewModel.activeSalesmanGrant.collectAsStateWithLifecycle()
+  val subscriptionStatus by viewModel.subscriptionStatus.collectAsStateWithLifecycle()
+  val isSalesmanSession = viewModel.isSalesmanSession
+
+  val visibleTabs =
+    remember(effectivePermissions) {
+      buildList {
+        if (effectivePermissions.canViewOverview) add(DashboardTab.OVERVIEW)
+        if (effectivePermissions.canViewBilling || effectivePermissions.canCreateInvoices) {
+          add(DashboardTab.BILLING)
+        }
+        if (effectivePermissions.canViewStock || effectivePermissions.canManageStock) {
+          add(DashboardTab.STOCK)
+        }
+        if (effectivePermissions.canViewParties || effectivePermissions.canManageParties) {
+          add(DashboardTab.PARTIES)
+        }
+        if (effectivePermissions.canViewExpenses || effectivePermissions.canManageExpenses) {
+          add(DashboardTab.EXPENSES)
+        }
+        if (effectivePermissions.canViewReports) {
+          add(DashboardTab.REPORTS)
+        }
+        add(DashboardTab.WORKSPACE)
+      }
+    }
 
   var selectedTab by rememberSaveable { mutableStateOf(DashboardTab.OVERVIEW) }
   var showProfilesSheet by remember { mutableStateOf(false) }
@@ -190,8 +228,17 @@ fun DashboardScreen(
   var showAddExpenseDialog by remember { mutableStateOf(false) }
   var showBackupSheet by remember { mutableStateOf(false) }
   var showAppSettingsSheet by remember { mutableStateOf(false) }
+  var showSalesmanTeamSheet by remember { mutableStateOf(false) }
+  var showSubscriptionSheet by remember { mutableStateOf(false) }
+  var upgradeDialogSpec by remember { mutableStateOf<Triple<String, String, SubscriptionTier>?>(null) }
   var pendingRestorePayload by remember { mutableStateOf<FinbossBackupPayload?>(null) }
   var selectedModuleForSheet by remember { mutableStateOf<ErpModuleConfig?>(null) }
+
+  LaunchedEffect(visibleTabs, selectedTab) {
+    if (selectedTab !in visibleTabs) {
+      selectedTab = visibleTabs.firstOrNull() ?: DashboardTab.WORKSPACE
+    }
+  }
 
   val exportBackupLauncher =
     rememberLauncherForActivityResult(
@@ -265,12 +312,14 @@ fun DashboardScreen(
     viewModel.clearBanner()
   }
 
-  BackHandler(enabled = selectedTab != DashboardTab.OVERVIEW) {
-    selectedTab = DashboardTab.OVERVIEW
+  val defaultHomeTab = visibleTabs.firstOrNull() ?: DashboardTab.WORKSPACE
+  BackHandler(enabled = selectedTab != defaultHomeTab) {
+    selectedTab = defaultHomeTab
   }
 
   val profile = (profileState as? UiState.Success)?.data
   val profiles = (profilesState as? UiState.Success)?.data.orEmpty()
+  val salesmen = (salesmenState as? UiState.Success)?.data.orEmpty()
   val activeSlotId = profile?.resolvedSlotId ?: activeProfileId
   val isPlainNonGst =
     profile?.isPlainNonGst == true || activeSlotId == BusinessProfile.SLOT_PLAIN_1
@@ -306,7 +355,7 @@ fun DashboardScreen(
           },
         ) {
           Spacer(modifier = Modifier.height(16.dp))
-          DashboardTab.entries.forEach { tab ->
+          visibleTabs.forEach { tab ->
             val selected = selectedTab == tab
             NavigationRailItem(
               selected = selected,
@@ -374,32 +423,76 @@ fun DashboardScreen(
               }
             },
             actions = {
-              IconButton(
-                onClick = { showProfilesSheet = true },
-                modifier = Modifier.testTag("switch_profile_topbar_button"),
-              ) {
-                Icon(
-                  imageVector = Icons.Filled.SwapHoriz,
-                  contentDescription = "Switch Business Account",
-                )
+              if (!isSalesmanSession) {
+                Surface(
+                  color =
+                    if (subscriptionStatus.isTrial) MaterialTheme.colorScheme.tertiaryContainer
+                    else MaterialTheme.colorScheme.primaryContainer,
+                  contentColor =
+                    if (subscriptionStatus.isTrial) MaterialTheme.colorScheme.onTertiaryContainer
+                    else MaterialTheme.colorScheme.onPrimaryContainer,
+                  shape = RoundedCornerShape(999.dp),
+                  modifier =
+                    Modifier.clickable { showSubscriptionSheet = true }
+                      .testTag("topbar_subscription_badge"),
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    Icon(
+                      imageVector = Icons.Filled.WorkspacePremium,
+                      contentDescription = "Subscription & Free Trial",
+                      modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                      text = subscriptionStatus.topBarBadgeText,
+                      style = MaterialTheme.typography.labelSmall,
+                      fontWeight = FontWeight.ExtraBold,
+                    )
+                  }
+                }
               }
-              IconButton(
-                onClick = { showAppSettingsSheet = true },
-                modifier = Modifier.testTag("topbar_settings_button"),
-              ) {
-                Icon(
-                  imageVector = Icons.Filled.Settings,
-                  contentDescription = "App Settings & Print Style",
-                )
+              if (!isSalesmanSession || allowedProfileIds.size > 1) {
+                IconButton(
+                  onClick = { showProfilesSheet = true },
+                  modifier = Modifier.testTag("switch_profile_topbar_button"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.SwapHoriz,
+                    contentDescription = "Switch Business Account",
+                  )
+                }
               }
-              IconButton(
-                onClick = { editingProfileSlot = activeSlotId to profile },
-                modifier = Modifier.testTag("edit_profile_button"),
-              ) {
-                Icon(
-                  imageVector = Icons.Filled.Edit,
-                  contentDescription = stringResource(R.string.action_edit_profile),
-                )
+              if (!isSalesmanSession) {
+                IconButton(
+                  onClick = { showSalesmanTeamSheet = true },
+                  modifier = Modifier.testTag("topbar_team_button"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.Badge,
+                    contentDescription = "Salesman Team & OTP Access",
+                  )
+                }
+                IconButton(
+                  onClick = { showAppSettingsSheet = true },
+                  modifier = Modifier.testTag("topbar_settings_button"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "App Settings & Print Style",
+                  )
+                }
+                IconButton(
+                  onClick = { editingProfileSlot = activeSlotId to profile },
+                  modifier = Modifier.testTag("edit_profile_button"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = stringResource(R.string.action_edit_profile),
+                  )
+                }
               }
               IconButton(
                 onClick = { selectedTab = DashboardTab.WORKSPACE },
@@ -413,61 +506,76 @@ fun DashboardScreen(
         floatingActionButton = {
           when (selectedTab) {
             DashboardTab.OVERVIEW ->
-              ExtendedFloatingActionButton(
-                onClick = { showNewInvoiceDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text(if (isPlainNonGst) "New Plain Bill" else "New GST Bill") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier.testTag("overview_new_bill_fab"),
-              )
+              if (effectivePermissions.canCreateInvoices) {
+                ExtendedFloatingActionButton(
+                  onClick = { showNewInvoiceDialog = true },
+                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                  text = { Text(if (isPlainNonGst) "New Plain Bill" else "New GST Bill") },
+                  containerColor = MaterialTheme.colorScheme.secondary,
+                  contentColor = MaterialTheme.colorScheme.onSecondary,
+                  modifier = Modifier.testTag("overview_new_bill_fab"),
+                )
+              }
             DashboardTab.BILLING ->
-              ExtendedFloatingActionButton(
-                onClick = { showNewInvoiceDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text(if (isPlainNonGst) "New Plain Bill" else "New Bill") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier.testTag("new_invoice_fab"),
-              )
+              if (effectivePermissions.canCreateInvoices) {
+                ExtendedFloatingActionButton(
+                  onClick = { showNewInvoiceDialog = true },
+                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                  text = { Text(if (isPlainNonGst) "New Plain Bill" else "New Bill") },
+                  containerColor = MaterialTheme.colorScheme.secondary,
+                  contentColor = MaterialTheme.colorScheme.onSecondary,
+                  modifier = Modifier.testTag("new_invoice_fab"),
+                )
+              }
             DashboardTab.STOCK ->
-              ExtendedFloatingActionButton(
-                onClick = { showAddInventoryDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add SKU") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier.testTag("add_inventory_fab"),
-              )
+              if (effectivePermissions.canManageStock) {
+                ExtendedFloatingActionButton(
+                  onClick = { showAddInventoryDialog = true },
+                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                  text = { Text("Add SKU") },
+                  containerColor = MaterialTheme.colorScheme.secondary,
+                  contentColor = MaterialTheme.colorScheme.onSecondary,
+                  modifier = Modifier.testTag("add_inventory_fab"),
+                )
+              }
             DashboardTab.PARTIES ->
-              ExtendedFloatingActionButton(
-                onClick = { showAddPartyDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add Party") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier.testTag("add_party_fab"),
-              )
+              if (effectivePermissions.canManageParties) {
+                ExtendedFloatingActionButton(
+                  onClick = { showAddPartyDialog = true },
+                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                  text = { Text("Add Party") },
+                  containerColor = MaterialTheme.colorScheme.secondary,
+                  contentColor = MaterialTheme.colorScheme.onSecondary,
+                  modifier = Modifier.testTag("add_party_fab"),
+                )
+              }
             DashboardTab.EXPENSES ->
-              ExtendedFloatingActionButton(
-                onClick = { showAddExpenseDialog = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add Expense") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier.testTag("add_expense_fab"),
-              )
+              if (effectivePermissions.canManageExpenses) {
+                ExtendedFloatingActionButton(
+                  onClick = { showAddExpenseDialog = true },
+                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                  text = { Text("Add Expense") },
+                  containerColor = MaterialTheme.colorScheme.secondary,
+                  contentColor = MaterialTheme.colorScheme.onSecondary,
+                  modifier = Modifier.testTag("add_expense_fab"),
+                )
+              }
             DashboardTab.REPORTS,
             DashboardTab.WORKSPACE -> {}
           }
         },
         bottomBar = {
           if (!useRail) {
+            val bottomTabs =
+              remember(visibleTabs) {
+                val primary = BOTTOM_BAR_TABS.filter { it in visibleTabs }
+                if (primary.size >= 2) primary else visibleTabs.take(5)
+              }
             NavigationBar(
               containerColor = MaterialTheme.colorScheme.surface,
               tonalElevation = 3.dp,
             ) {
-              BOTTOM_BAR_TABS.forEach { tab ->
+              bottomTabs.forEach { tab ->
                 val selected = selectedTab == tab
                 NavigationBarItem(
                   selected = selected,
@@ -499,29 +607,40 @@ fun DashboardScreen(
                   profilesCount = profiles.size.coerceAtLeast(if (profile != null) 1 else 0),
                   activeSlotId = activeSlotId,
                   isPlainNonGst = isPlainNonGst,
+                  isSalesmanSession = isSalesmanSession,
+                  salesmanGrant = activeSalesmanGrant,
+                  effectivePermissions = effectivePermissions,
+                  allowedProfilesCount = allowedProfileIds.size,
                   modulesState = modulesState,
                   entriesState = entriesState,
                   invoicesState = invoicesState,
                   kpiSummary = kpiSummary,
                   syncState = syncState,
                   currency = currency,
-                  onOpenSyncSheet = { showBackupSheet = true },
+                  onOpenSyncSheet = { if (!isSalesmanSession) showBackupSheet = true },
                   onOpenProfilesSheet = { showProfilesSheet = true },
-                  onEditProfile = { editingProfileSlot = activeSlotId to profile },
-                  onAddEntry = { showAddEntryDialog = true },
+                  onEditProfile = { if (!isSalesmanSession) editingProfileSlot = activeSlotId to profile },
+                  onAddEntry = { if (effectivePermissions.canAddQuickEntry) showAddEntryDialog = true },
                   onSelectModule = { module ->
                     when (module.code) {
-                      "billing" -> selectedTab = DashboardTab.BILLING
-                      "inventory" -> selectedTab = DashboardTab.STOCK
-                      "parties" -> selectedTab = DashboardTab.PARTIES
-                      "expenses" -> selectedTab = DashboardTab.EXPENSES
-                      "gst_reports" -> selectedTab = DashboardTab.REPORTS
-                      else -> selectedModuleForSheet = module
+                      "billing" ->
+                        if (DashboardTab.BILLING in visibleTabs) selectedTab = DashboardTab.BILLING
+                      "inventory" ->
+                        if (DashboardTab.STOCK in visibleTabs) selectedTab = DashboardTab.STOCK
+                      "parties" ->
+                        if (DashboardTab.PARTIES in visibleTabs) selectedTab = DashboardTab.PARTIES
+                      "expenses" ->
+                        if (DashboardTab.EXPENSES in visibleTabs) selectedTab = DashboardTab.EXPENSES
+                      "gst_reports" ->
+                        if (DashboardTab.REPORTS in visibleTabs) selectedTab = DashboardTab.REPORTS
+                      else -> if (!isSalesmanSession) selectedModuleForSheet = module
                     }
                   },
-                  onNavigateTab = { selectedTab = it },
-                  onMarkPaid = { viewModel.markEntryPaid(it) },
-                  onDeleteEntry = { viewModel.deleteDashboardEntry(it) },
+                  onNavigateTab = { target ->
+                    if (target in visibleTabs) selectedTab = target
+                  },
+                  onMarkPaid = { if (effectivePermissions.canAddQuickEntry) viewModel.markEntryPaid(it) },
+                  onDeleteEntry = { if (effectivePermissions.canAddQuickEntry) viewModel.deleteDashboardEntry(it) },
                   onRetryWorkspace = { viewModel.initializeWorkspace() },
                 )
               DashboardTab.BILLING ->
@@ -549,10 +668,19 @@ fun DashboardScreen(
                   },
                   onDeleteInvoice = { viewModel.deleteInvoice(it) },
                   onNotifyMessage = { viewModel.notifyBanner(it) },
-                  onOpenAppSettings = { showAppSettingsSheet = true },
-                  showNewInvoiceDialog = showNewInvoiceDialog,
+                  onOpenAppSettings = { if (!isSalesmanSession) showAppSettingsSheet = true },
+                  showNewInvoiceDialog = showNewInvoiceDialog && effectivePermissions.canCreateInvoices,
                   onDismissNewInvoiceDialog = { showNewInvoiceDialog = false },
-                  onOpenNewInvoiceDialog = { showNewInvoiceDialog = true },
+                  onOpenNewInvoiceDialog = { if (effectivePermissions.canCreateInvoices) showNewInvoiceDialog = true },
+                  canCreateInvoices = effectivePermissions.canCreateInvoices,
+                  canEditDeleteInvoices = effectivePermissions.canEditDeleteInvoices,
+                  canPrintInvoices = effectivePermissions.canPrintInvoices,
+                  canRecordPayments = effectivePermissions.canCreateInvoices || effectivePermissions.canEditDeleteInvoices,
+                  subscriptionStatus = subscriptionStatus,
+                  onSaveEInvoice = { inv, res -> viewModel.saveInvoiceEInvoice(inv, res) },
+                  onCancelEInvoice = { inv -> viewModel.cancelInvoiceEInvoice(inv) },
+                  onSaveEWayBill = { inv, res -> viewModel.saveInvoiceEWayBill(inv, res) },
+                  onOpenSubscriptionPlans = { showSubscriptionSheet = true },
                 )
               DashboardTab.STOCK ->
                 InventoryModuleContent(
@@ -574,9 +702,10 @@ fun DashboardScreen(
                     viewModel.adjustInventoryStock(item, delta, onDone)
                   },
                   onDeleteItem = { viewModel.deleteInventoryItem(it) },
-                  showAddItemDialog = showAddInventoryDialog,
+                  showAddItemDialog = showAddInventoryDialog && effectivePermissions.canManageStock,
                   onDismissAddItemDialog = { showAddInventoryDialog = false },
-                  onOpenAddItemDialog = { showAddInventoryDialog = true },
+                  onOpenAddItemDialog = { if (effectivePermissions.canManageStock) showAddInventoryDialog = true },
+                  canManageStock = effectivePermissions.canManageStock,
                 )
               DashboardTab.PARTIES ->
                 PartiesModuleContent(
@@ -591,9 +720,10 @@ fun DashboardScreen(
                     viewModel.recordPartyPayment(party, amt, onDone)
                   },
                   onDeleteParty = { viewModel.deleteParty(it) },
-                  showAddPartyDialog = showAddPartyDialog,
+                  showAddPartyDialog = showAddPartyDialog && effectivePermissions.canManageParties,
                   onDismissAddPartyDialog = { showAddPartyDialog = false },
-                  onOpenAddPartyDialog = { showAddPartyDialog = true },
+                  onOpenAddPartyDialog = { if (effectivePermissions.canManageParties) showAddPartyDialog = true },
+                  canManageParties = effectivePermissions.canManageParties,
                 )
               DashboardTab.EXPENSES ->
                 ExpensesModuleContent(
@@ -611,9 +741,10 @@ fun DashboardScreen(
                   },
                   onMarkSettled = { id, method -> viewModel.markExpenseSettled(id, method) },
                   onDeleteExpense = { viewModel.deleteExpense(it) },
-                  showAddExpenseDialog = showAddExpenseDialog,
+                  showAddExpenseDialog = showAddExpenseDialog && effectivePermissions.canManageExpenses,
                   onDismissAddExpenseDialog = { showAddExpenseDialog = false },
-                  onOpenAddExpenseDialog = { showAddExpenseDialog = true },
+                  onOpenAddExpenseDialog = { if (effectivePermissions.canManageExpenses) showAddExpenseDialog = true },
+                  canManageExpenses = effectivePermissions.canManageExpenses,
                 )
               DashboardTab.REPORTS ->
                 ReportsModuleContent(
@@ -630,6 +761,11 @@ fun DashboardScreen(
                   profilesCount = profiles.size.coerceAtLeast(if (profile != null) 1 else 0),
                   activeSlotId = activeSlotId,
                   isPlainNonGst = isPlainNonGst,
+                  isSalesmanSession = isSalesmanSession,
+                  salesmanGrant = activeSalesmanGrant,
+                  effectivePermissions = effectivePermissions,
+                  allowedProfileIds = allowedProfileIds,
+                  salesmen = salesmen,
                   modulesState = modulesState,
                   syncState = syncState,
                   appSettings = appSettings,
@@ -638,7 +774,10 @@ fun DashboardScreen(
                   userEmail = userEmail,
                   userPhotoUrl = userPhotoUrl,
                   currency = currency,
+                  subscriptionStatus = subscriptionStatus,
+                  onOpenSubscriptionPlans = { showSubscriptionSheet = true },
                   onManageProfiles = { showProfilesSheet = true },
+                  onManageSalesmen = { showSalesmanTeamSheet = true },
                   onEditProfile = { editingProfileSlot = activeSlotId to profile },
                   onOpenAppSettings = { showAppSettingsSheet = true },
                   onSyncNow = { viewModel.syncNow() },
@@ -646,17 +785,24 @@ fun DashboardScreen(
                   onRestoreBackup = triggerRestoreBackup,
                   onSelectModule = { module ->
                     when (module.code) {
-                      "dashboard" -> selectedTab = DashboardTab.OVERVIEW
-                      "billing" -> selectedTab = DashboardTab.BILLING
-                      "inventory" -> selectedTab = DashboardTab.STOCK
-                      "parties" -> selectedTab = DashboardTab.PARTIES
-                      "expenses" -> selectedTab = DashboardTab.EXPENSES
-                      "gst_reports" -> selectedTab = DashboardTab.REPORTS
-                      else -> selectedModuleForSheet = module
+                      "dashboard" ->
+                        if (DashboardTab.OVERVIEW in visibleTabs) selectedTab = DashboardTab.OVERVIEW
+                      "billing" ->
+                        if (DashboardTab.BILLING in visibleTabs) selectedTab = DashboardTab.BILLING
+                      "inventory" ->
+                        if (DashboardTab.STOCK in visibleTabs) selectedTab = DashboardTab.STOCK
+                      "parties" ->
+                        if (DashboardTab.PARTIES in visibleTabs) selectedTab = DashboardTab.PARTIES
+                      "expenses" ->
+                        if (DashboardTab.EXPENSES in visibleTabs) selectedTab = DashboardTab.EXPENSES
+                      "gst_reports" ->
+                        if (DashboardTab.REPORTS in visibleTabs) selectedTab = DashboardTab.REPORTS
+                      else -> if (!isSalesmanSession) selectedModuleForSheet = module
                     }
                   },
-                  onTogglePin = { viewModel.toggleModulePin(it) },
+                  onTogglePin = { if (!isSalesmanSession) viewModel.toggleModulePin(it) },
                   onSignOut = {
+                    viewModel.clearSalesmanSessionOnSignOut()
                     signOutUser(CredentialManager.create(context), coroutineScope)
                   },
                 )
@@ -696,47 +842,80 @@ fun DashboardScreen(
       profiles = profiles,
       activeSlotId = activeSlotId,
       isBusy = isBusy,
+      allowedSlots = allowedProfileIds,
+      canManageProfiles = !isSalesmanSession,
       onSwitchProfile = { slotId ->
-        viewModel.switchActiveProfile(slotId)
-        showProfilesSheet = false
+        if (!isSalesmanSession && !subscriptionStatus.canUseProfileSlot(slotId)) {
+          showProfilesSheet = false
+          val reqTier =
+            if (slotId == BusinessProfile.SLOT_PLAIN_1) SubscriptionTier.DIAMOND
+            else SubscriptionTier.GOLD
+          upgradeDialogSpec =
+            Triple(
+              "Multi-Profile Account ($slotId)",
+              "Your ${subscriptionStatus.effectiveTier.displayName} supports up to ${subscriptionStatus.maxProfiles} business profile(s). Upgrade to ${reqTier.displayName} to unlock this business account.",
+              reqTier,
+            )
+        } else {
+          viewModel.switchActiveProfile(slotId)
+          showProfilesSheet = false
+        }
       },
       onCreateOrEditSlot = { slotId, existing ->
-        showProfilesSheet = false
-        editingProfileSlot = slotId to existing
+        if (!isSalesmanSession) {
+          showProfilesSheet = false
+          if (!subscriptionStatus.canUseProfileSlot(slotId)) {
+            val reqTier =
+              if (slotId == BusinessProfile.SLOT_PLAIN_1) SubscriptionTier.DIAMOND
+              else SubscriptionTier.GOLD
+            upgradeDialogSpec =
+              Triple(
+                "Business Profile Slot ($slotId)",
+                "Your ${subscriptionStatus.effectiveTier.displayName} allows up to ${subscriptionStatus.maxProfiles} business profile(s). Upgrade to ${reqTier.displayName} (or activate 30-Day Free Trial) to configure additional business profiles.",
+                reqTier,
+              )
+          } else {
+            editingProfileSlot = slotId to existing
+          }
+        }
       },
-      onDeleteSlot = { slotId -> viewModel.deleteProfileAccount(slotId) },
+      onDeleteSlot = { slotId ->
+        if (!isSalesmanSession) viewModel.deleteProfileAccount(slotId)
+      },
       onDismiss = { showProfilesSheet = false },
     )
   }
 
-  editingProfileSlot?.let { (slotId, targetProfile) ->
-    BusinessProfileDialog(
-      profile = targetProfile,
-      slotId = slotId,
-      defaultOwnerName = profile?.ownerName ?: userDisplayName,
-      isBusy = isBusy,
-      onDismiss = { editingProfileSlot = null },
-      onSave = { owner, biz, gstin, curr, fy, type, target, address, state, pincode ->
-        viewModel.saveProfileAccount(
-          slotId = slotId,
-          ownerName = owner,
-          businessName = biz,
-          gstin = gstin,
-          currencySymbol = curr,
-          fiscalYearLabel = fy,
-          businessType = type,
-          monthlySalesTarget = target,
-          address = address,
-          state = state,
-          pincode = pincode,
-          switchToAfterSave = true,
-          onDone = { editingProfileSlot = null },
-        )
-      },
-    )
+  if (!isSalesmanSession) {
+    editingProfileSlot?.let { (slotId, targetProfile) ->
+      BusinessProfileDialog(
+        profile = targetProfile,
+        slotId = slotId,
+        defaultOwnerName = profile?.ownerName ?: userDisplayName,
+        isBusy = isBusy,
+        onDismiss = { editingProfileSlot = null },
+        onSave = { owner, biz, gstin, curr, fy, type, target, address, state, pincode ->
+          viewModel.saveProfileAccount(
+            slotId = slotId,
+            ownerName = owner,
+            businessName = biz,
+            gstin = gstin,
+            currencySymbol = curr,
+            fiscalYearLabel = fy,
+            businessType = type,
+            monthlySalesTarget = target,
+            address = address,
+            state = state,
+            pincode = pincode,
+            switchToAfterSave = true,
+            onDone = { editingProfileSlot = null },
+          )
+        },
+      )
+    }
   }
 
-  if (showAddEntryDialog) {
+  if (showAddEntryDialog && effectivePermissions.canAddQuickEntry) {
     AddDashboardEntryDialog(
       currencySymbol = currency,
       isBusy = isBusy,
@@ -761,7 +940,7 @@ fun DashboardScreen(
       liveList.firstOrNull { it.id == selected.id } ?: selected
     }
 
-  if (activeSheetModule != null) {
+  if (activeSheetModule != null && !isSalesmanSession) {
     ModuleDetailSheet(
       module = activeSheetModule,
       onDismiss = { selectedModuleForSheet = null },
@@ -770,7 +949,7 @@ fun DashboardScreen(
     )
   }
 
-  if (showBackupSheet) {
+  if (showBackupSheet && !isSalesmanSession) {
     BackupSyncModalSheet(
       syncState = syncState,
       isBusy = isBusy,
@@ -781,26 +960,92 @@ fun DashboardScreen(
     )
   }
 
-  pendingRestorePayload?.let { payload ->
-    RestoreBackupConfirmDialog(
-      payload = payload,
-      isBusy = isBusy,
-      onConfirm = {
-        viewModel.restoreBackup(payload) {
-          pendingRestorePayload = null
-        }
-      },
-      onDismiss = { pendingRestorePayload = null },
-    )
+  if (!isSalesmanSession) {
+    pendingRestorePayload?.let { payload ->
+      RestoreBackupConfirmDialog(
+        payload = payload,
+        isBusy = isBusy,
+        onConfirm = {
+          viewModel.restoreBackup(payload) {
+            pendingRestorePayload = null
+          }
+        },
+        onDismiss = { pendingRestorePayload = null },
+      )
+    }
   }
 
-  if (showAppSettingsSheet) {
+  if (showAppSettingsSheet && !isSalesmanSession) {
     AppSettingsSheet(
       settings = appSettings,
       isPlainNonGst = isPlainNonGst,
       onUpdateSettings = { transform -> viewModel.updateAppSettings(transform) },
       onResetDefaults = { viewModel.resetAppSettings() },
       onDismiss = { showAppSettingsSheet = false },
+    )
+  }
+
+  if (showSalesmanTeamSheet && !isSalesmanSession) {
+    SalesmanTeamSheet(
+      salesmen = salesmen,
+      profiles = profiles,
+      isBusy = isBusy,
+      onSaveSeat = { seatId, existing, name, phoneE164, roleLabel, isActive, allowedProfiles, perms, onDone ->
+        if (!subscriptionStatus.canUseSalesmanSeat(seatId)) {
+          showSalesmanTeamSheet = false
+          val reqTier =
+            if (seatId in listOf("seat_1", "seat_2")) SubscriptionTier.GOLD
+            else SubscriptionTier.DIAMOND
+          upgradeDialogSpec =
+            Triple(
+              "Salesman OTP Seat (${seatId.replace("_", " ").uppercase()})",
+              "Your ${subscriptionStatus.effectiveTier.displayName} includes ${subscriptionStatus.maxSalesmen} Salesman OTP seat(s). Upgrade to ${reqTier.displayName} to unlock more salesman logins.",
+              reqTier,
+            )
+        } else {
+          viewModel.saveSalesmanSeat(
+            seatId = seatId,
+            existingSeat = existing,
+            name = name,
+            rawPhoneE164 = phoneE164,
+            roleLabel = roleLabel,
+            isActive = isActive,
+            allowedProfiles = allowedProfiles,
+            permissions = perms,
+            onDone = onDone,
+          )
+        }
+      },
+      onToggleActive = { seat, isActive -> viewModel.toggleSalesmanActive(seat, isActive) },
+      onDeleteSeat = { seat -> viewModel.deleteSalesmanSeat(seat) },
+      onDismiss = { showSalesmanTeamSheet = false },
+    )
+  }
+
+  if (showSubscriptionSheet) {
+    SubscriptionPlansSheet(
+      status = subscriptionStatus,
+      isOwnerSession = !isSalesmanSession,
+      onActivatePlan = { tier, cycle ->
+        viewModel.activateSubscriptionPlan(tier, cycle) {
+          showSubscriptionSheet = false
+        }
+      },
+      onDismiss = { showSubscriptionSheet = false },
+    )
+  }
+
+  upgradeDialogSpec?.let { (featureTitle, featureDesc, recTier) ->
+    UpgradePlanRequiredDialog(
+      featureTitle = featureTitle,
+      featureDescription = featureDesc,
+      currentPlanLabel = subscriptionStatus.topBarBadgeText,
+      recommendedTier = recTier,
+      onViewPlans = {
+        upgradeDialogSpec = null
+        showSubscriptionSheet = true
+      },
+      onDismiss = { upgradeDialogSpec = null },
     )
   }
 }
@@ -812,6 +1057,10 @@ private fun OverviewTabContent(
   profilesCount: Int,
   activeSlotId: String,
   isPlainNonGst: Boolean,
+  isSalesmanSession: Boolean,
+  salesmanGrant: PhoneAccessGrant?,
+  effectivePermissions: SalesmanPermissions,
+  allowedProfilesCount: Int,
   modulesState: UiState<List<ErpModuleConfig>>,
   entriesState: UiState<List<DashboardEntry>>,
   invoicesState: UiState<List<GstInvoice>>,
@@ -839,11 +1088,56 @@ private fun OverviewTabContent(
     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
-    item {
-      SyncStatusPill(
-        syncState = syncState,
-        onClick = onOpenSyncSheet,
-      )
+    if (isSalesmanSession) {
+      item {
+        Surface(
+          shape = MaterialTheme.shapes.medium,
+          color = MaterialTheme.colorScheme.secondaryContainer,
+          modifier = Modifier.fillMaxWidth().testTag("salesman_active_session_banner"),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.weight(1f),
+            ) {
+              Icon(
+                imageVector = Icons.Filled.PhoneAndroid,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(18.dp),
+              )
+              Column {
+                Text(
+                  text = "Salesman Mode • ${salesmanGrant?.roleLabel?.ifBlank { "Salesman" } ?: "Salesman"}",
+                  style = MaterialTheme.typography.labelLarge,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                  text = "${salesmanGrant?.salesmanName.orEmpty()} (${salesmanGrant?.phoneNumber.orEmpty()})",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                )
+              }
+            }
+            TextButton(onClick = { onNavigateTab(DashboardTab.WORKSPACE) }) {
+              Text("Access Info")
+            }
+          }
+        }
+      }
+    } else {
+      item {
+        SyncStatusPill(
+          syncState = syncState,
+          onClick = onOpenSyncSheet,
+        )
+      }
     }
 
     item {
@@ -852,6 +1146,8 @@ private fun OverviewTabContent(
         profilesCount = profilesCount,
         activeSlotId = activeSlotId,
         isPlainNonGst = isPlainNonGst,
+        isSalesmanSession = isSalesmanSession,
+        allowedProfilesCount = allowedProfilesCount,
         kpiSummary = kpiSummary,
         currency = currency,
         isLoading = profileState is UiState.Loading,
@@ -1076,10 +1372,12 @@ private fun OverviewTabContent(
           style = MaterialTheme.typography.titleLarge,
           color = MaterialTheme.colorScheme.onBackground,
         )
-        TextButton(onClick = onAddEntry, modifier = Modifier.testTag("overview_add_entry_btn")) {
-          Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Quick Entry")
+        if (effectivePermissions.canAddQuickEntry) {
+          TextButton(onClick = onAddEntry, modifier = Modifier.testTag("overview_add_entry_btn")) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Quick Entry")
+          }
         }
       }
     }
@@ -1097,12 +1395,18 @@ private fun OverviewTabContent(
       }
       is UiState.Success -> {
         if (entries.isEmpty()) {
-          item { EmptyLedgerCard(onAddEntry = onAddEntry) }
+          item {
+            EmptyLedgerCard(
+              canAddEntry = effectivePermissions.canAddQuickEntry,
+              onAddEntry = onAddEntry,
+            )
+          }
         } else {
           items(entries, key = { it.id }) { entry ->
             DashboardEntryRow(
               entry = entry,
               currency = currency,
+              canModify = effectivePermissions.canAddQuickEntry,
               onMarkPaid = { onMarkPaid(entry.id) },
               onDelete = { onDeleteEntry(entry.id) },
             )
@@ -1167,6 +1471,8 @@ private fun ExecutiveWorkspaceCard(
   profilesCount: Int,
   activeSlotId: String,
   isPlainNonGst: Boolean,
+  isSalesmanSession: Boolean = false,
+  allowedProfilesCount: Int = 3,
   kpiSummary: DashboardKpiSummary,
   currency: String,
   isLoading: Boolean,
@@ -1252,47 +1558,53 @@ private fun ExecutiveWorkspaceCard(
           horizontalAlignment = Alignment.End,
           verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          Surface(
-            color = Color(0x2E10B981),
-            shape = MaterialTheme.shapes.small,
-            modifier =
-              Modifier.clickable(onClick = onOpenProfilesSheet).testTag("banner_switch_profile"),
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
+          if (!isSalesmanSession || allowedProfilesCount > 1) {
+            Surface(
+              color = Color(0x2E10B981),
+              shape = MaterialTheme.shapes.small,
+              modifier =
+                Modifier.clickable(onClick = onOpenProfilesSheet).testTag("banner_switch_profile"),
             ) {
-              Icon(
-                imageVector = Icons.Filled.SwapHoriz,
-                contentDescription = "Switch business profile",
-                tint = Color(0xFFA7F3D0),
-                modifier = Modifier.size(16.dp),
-              )
-              Text(
-                text = "Switch ($profilesCount/3)",
-                style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFFA7F3D0),
-              )
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.SwapHoriz,
+                  contentDescription = "Switch business profile",
+                  tint = Color(0xFFA7F3D0),
+                  modifier = Modifier.size(16.dp),
+                )
+                Text(
+                  text =
+                    if (isSalesmanSession) "Switch ($profilesCount)"
+                    else "Switch ($profilesCount/3)",
+                  style = MaterialTheme.typography.labelMedium,
+                  color = Color(0xFFA7F3D0),
+                )
+              }
             }
           }
-          Surface(
-            color = Color(0x1FFFFFFF),
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.clickable(onClick = onEditProfile).testTag("banner_edit_profile"),
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
+          if (!isSalesmanSession) {
+            Surface(
+              color = Color(0x1FFFFFFF),
+              shape = MaterialTheme.shapes.small,
+              modifier = Modifier.clickable(onClick = onEditProfile).testTag("banner_edit_profile"),
             ) {
-              Icon(
-                imageVector = Icons.Filled.Edit,
-                contentDescription = stringResource(R.string.action_edit_profile),
-                tint = Color.White,
-                modifier = Modifier.size(16.dp),
-              )
-              Text(text = "Setup", style = MaterialTheme.typography.labelMedium, color = Color.White)
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.Edit,
+                  contentDescription = stringResource(R.string.action_edit_profile),
+                  tint = Color.White,
+                  modifier = Modifier.size(16.dp),
+                )
+                Text(text = "Setup", style = MaterialTheme.typography.labelMedium, color = Color.White)
+              }
             }
           }
         }
@@ -1489,6 +1801,7 @@ private fun PinnedModuleCard(module: ErpModuleConfig, onClick: () -> Unit) {
 private fun DashboardEntryRow(
   entry: DashboardEntry,
   currency: String,
+  canModify: Boolean = true,
   onMarkPaid: () -> Unit,
   onDelete: () -> Unit,
 ) {
@@ -1563,20 +1876,22 @@ private fun DashboardEntryRow(
         }
       }
 
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        if (isPending) {
-          TextButton(onClick = onMarkPaid) {
-            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Mark Settled")
+      if (canModify) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+          horizontalArrangement = Arrangement.End,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (isPending) {
+            TextButton(onClick = onMarkPaid) {
+              Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Mark Settled")
+            }
           }
-        }
-        IconButton(onClick = onDelete) {
-          Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete entry", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+          IconButton(onClick = onDelete) {
+            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete entry", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
         }
       }
     }
@@ -1584,7 +1899,10 @@ private fun DashboardEntryRow(
 }
 
 @Composable
-private fun EmptyLedgerCard(onAddEntry: () -> Unit) {
+private fun EmptyLedgerCard(
+  canAddEntry: Boolean = true,
+  onAddEntry: () -> Unit,
+) {
   Card(
     shape = MaterialTheme.shapes.large,
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1601,21 +1919,29 @@ private fun EmptyLedgerCard(onAddEntry: () -> Unit) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
-      OutlinedButton(onClick = onAddEntry, modifier = Modifier.testTag("empty_add_entry_button")) {
-        Icon(Icons.Filled.Add, contentDescription = null)
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Add Quick Entry")
+      if (canAddEntry) {
+        OutlinedButton(onClick = onAddEntry, modifier = Modifier.testTag("empty_add_entry_button")) {
+          Icon(Icons.Filled.Add, contentDescription = null)
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Add Quick Entry")
+        }
       }
     }
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkspaceTabContent(
   profile: BusinessProfile?,
   profilesCount: Int,
   activeSlotId: String,
   isPlainNonGst: Boolean,
+  isSalesmanSession: Boolean,
+  salesmanGrant: PhoneAccessGrant?,
+  effectivePermissions: SalesmanPermissions,
+  allowedProfileIds: List<String>,
+  salesmen: List<SalesmanSeat>,
   modulesState: UiState<List<ErpModuleConfig>>,
   syncState: WorkspaceSyncState,
   appSettings: ErpAppSettings,
@@ -1624,7 +1950,10 @@ private fun WorkspaceTabContent(
   userEmail: String?,
   userPhotoUrl: String?,
   currency: String,
+  subscriptionStatus: SubscriptionStatus = SubscriptionStatus.fromProfile(profile),
+  onOpenSubscriptionPlans: () -> Unit = {},
   onManageProfiles: () -> Unit,
+  onManageSalesmen: () -> Unit,
   onEditProfile: () -> Unit,
   onOpenAppSettings: () -> Unit,
   onSyncNow: () -> Unit,
@@ -1661,17 +1990,39 @@ private fun WorkspaceTabContent(
         ) {
           UserAvatar(photoUrl = userPhotoUrl, size = 54.dp)
           Column(modifier = Modifier.weight(1f)) {
-            Text(text = profile?.ownerName ?: userDisplayName, style = MaterialTheme.typography.titleLarge)
+            Text(
+              text =
+                if (isSalesmanSession) {
+                  salesmanGrant?.salesmanName?.ifBlank { userDisplayName } ?: userDisplayName
+                } else {
+                  profile?.ownerName ?: userDisplayName
+                },
+              style = MaterialTheme.typography.titleLarge,
+            )
             if (!userEmail.isNullOrBlank()) {
-              Text(text = userEmail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              Text(
+                text =
+                  if (isSalesmanSession) {
+                    "Mobile OTP Login: $userEmail • ${salesmanGrant?.roleLabel?.ifBlank { "Salesman" } ?: "Salesman"}"
+                  } else {
+                    userEmail
+                  },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
             }
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Icon(Icons.Filled.CloudDone, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
               Text(
                 text =
-                  if (syncState.isOnline) "Google Authenticated & Cloud Synced"
-                  else "Offline Mode • Cached Locally",
+                  if (isSalesmanSession) {
+                    "Connected to ${profile?.businessName ?: "Owner Workspace"} • Live Sync"
+                  } else if (syncState.isOnline) {
+                    "Google Authenticated & Cloud Synced"
+                  } else {
+                    "Offline Mode • Cached Locally"
+                  },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
               )
@@ -1681,77 +2032,293 @@ private fun WorkspaceTabContent(
       }
     }
 
-    item {
-      BackupSyncCard(
-        syncState = syncState,
-        isBusy = isBusy,
-        onSyncNow = onSyncNow,
-        onExportBackup = onExportBackup,
-        onRestoreBackup = onRestoreBackup,
-      )
-    }
-
-    item {
-      Card(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(18.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+    if (!isSalesmanSession) {
+      // Subscription & Plan Access Card (30-Day Free Trial + Silver ₹300, Gold ₹500, Diamond ₹700)
+      item {
+        Card(
+          shape = MaterialTheme.shapes.large,
+          colors =
+            CardDefaults.cardColors(
+              containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            ),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("workspace_subscription_plan_card"),
         ) {
-          Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-              Icon(Icons.Filled.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-              Text(text = "App Logic & Print Settings", style = MaterialTheme.typography.titleMedium)
+          Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.WorkspacePremium,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                  Text(
+                    text = "Subscription & Plan (${subscriptionStatus.topBarBadgeText})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+                Text(
+                  text = subscriptionStatus.statusSummaryText,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Button(
+                onClick = onOpenSubscriptionPlans,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_manage_subscription_button"),
+              ) {
+                Text("Plans & Upgrade")
+              }
             }
             Text(
-              text = "${appSettings.defaultPaperSize.label} • ${appSettings.defaultPrintStyle.label} • Prefix ${appSettings.invoicePrefix}",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              text = "Silver ₹300/mo • Gold ₹500/mo (10% Off Yearly: ₹5,400/yr) • Diamond ₹700/mo (20% Off Yearly: ₹6,720/yr)",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.primary,
+              fontWeight = FontWeight.SemiBold,
             )
-          }
-          Button(
-            onClick = onOpenAppSettings,
-            modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_open_settings_button"),
-          ) {
-            Text("Configure")
           }
         }
       }
-    }
+      // Owner Salesman Team & OTP Access Card (Max 5 Seats)
+      item {
+        val activeCount = remember(salesmen) { salesmen.count { it.isActive } }
+        Card(
+          shape = MaterialTheme.shapes.large,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("workspace_salesman_team_card"),
+        ) {
+          Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  Icon(
+                    imageVector = Icons.Filled.Badge,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                  Text(
+                    text = "Salesman Team & OTP Access (${salesmen.size}/${SalesmanSeatConfig.MAX_SALESMEN} Seats)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+                Text(
+                  text =
+                    if (salesmen.isEmpty()) {
+                      "Add up to 5 salesmen by Mobile Number (OTP login) and configure exact permissions & profiles."
+                    } else {
+                      "$activeCount active of ${salesmen.size} configured salesmen • Owner-controlled permissions"
+                    },
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Button(
+                onClick = onManageSalesmen,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_manage_team_button"),
+              ) {
+                Text("Manage Team")
+              }
+            }
 
-    item {
-      Card(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (salesmen.isNotEmpty()) {
+              FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                salesmen.forEach { seat ->
+                  Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color =
+                      if (seat.isActive) MaterialTheme.colorScheme.secondaryContainer
+                      else MaterialTheme.colorScheme.surfaceVariant,
+                  ) {
+                    Text(
+                      text = "${seat.name} • ${seat.phoneNumber}${if (!seat.isActive) " (Paused)" else ""}",
+                      style = MaterialTheme.typography.labelSmall,
+                      color =
+                        if (seat.isActive) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      item {
+        BackupSyncCard(
+          syncState = syncState,
+          isBusy = isBusy,
+          onSyncNow = onSyncNow,
+          onExportBackup = onExportBackup,
+          onRestoreBackup = onRestoreBackup,
+        )
+      }
+
+      item {
+        Card(
+          shape = MaterialTheme.shapes.large,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
           Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(text = "Business Profiles ($profilesCount/3 Accounts)", style = MaterialTheme.typography.titleMedium)
+            Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Filled.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Text(text = "App Logic & Print Settings", style = MaterialTheme.typography.titleMedium)
+              }
               Text(
-                text = "Active: $slotLabel • ${if (isPlainNonGst) "Plain Non-GST Bills" else "Main GST Full ERP"}",
+                text = "${appSettings.defaultPaperSize.label} • ${appSettings.defaultPrintStyle.label} • Prefix ${appSettings.invoicePrefix}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
             }
             Button(
-              onClick = onManageProfiles,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_manage_profiles_button"),
+              onClick = onOpenAppSettings,
+              modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_open_settings_button"),
             ) {
-              Icon(Icons.Filled.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(6.dp))
-              Text("Manage")
+              Text("Configure")
+            }
+          }
+        }
+      }
+    } else {
+      // Salesman Access Summary Card
+      item {
+        Card(
+          shape = MaterialTheme.shapes.large,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("salesman_permissions_summary_card"),
+        ) {
+          Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Filled.Badge,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+              )
+              Text(
+                text = "Your Assigned Salesman Access",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+              )
+            }
+            Text(
+              text = "Configured by Business Owner • Seat ${salesmanGrant?.seatId?.removePrefix("seat_") ?: "1"} of 5",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              val badges = buildList {
+                if (effectivePermissions.canCreateInvoices) add("Create Bills")
+                else if (effectivePermissions.canViewBilling) add("View Bills")
+                if (effectivePermissions.canPrintInvoices) add("Print / PDF")
+                if (effectivePermissions.canEditDeleteInvoices) add("Edit / Delete Bills")
+                if (effectivePermissions.canManageStock) add("Manage Stock & Purchase")
+                else if (effectivePermissions.canViewStock) add("View Stock")
+                if (effectivePermissions.canManageParties) add("Manage Parties & Khata")
+                else if (effectivePermissions.canViewParties) add("View Parties")
+                if (effectivePermissions.canManageExpenses) add("Manage Expenses")
+                else if (effectivePermissions.canViewExpenses) add("View Cashbook")
+                if (effectivePermissions.canViewReports) add("GST & P&L Reports")
+                if (effectivePermissions.canAddQuickEntry) add("Quick Cashbook Entry")
+              }
+              badges.forEach { badge ->
+                Surface(
+                  shape = RoundedCornerShape(999.dp),
+                  color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                  Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (!isSalesmanSession || allowedProfileIds.size > 1) {
+      item {
+        Card(
+          shape = MaterialTheme.shapes.large,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text =
+                    if (isSalesmanSession) "Allowed Business Profiles ($profilesCount)"
+                    else "Business Profiles ($profilesCount/3 Accounts)",
+                  style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                  text = "Active: $slotLabel • ${if (isPlainNonGst) "Plain Non-GST Bills" else "Main GST Full ERP"}",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Button(
+                onClick = onManageProfiles,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("workspace_manage_profiles_button"),
+              ) {
+                Icon(Icons.Filled.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (isSalesmanSession) "Switch" else "Manage")
+              }
             }
           }
         }
@@ -1775,8 +2342,10 @@ private fun WorkspaceTabContent(
               Icon(Icons.Filled.Business, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
               Text(text = "Business Configuration", style = MaterialTheme.typography.titleMedium)
             }
-            OutlinedButton(onClick = onEditProfile, modifier = Modifier.testTag("workspace_edit_profile_button")) {
-              Text("Edit")
+            if (!isSalesmanSession) {
+              OutlinedButton(onClick = onEditProfile, modifier = Modifier.testTag("workspace_edit_profile_button")) {
+                Text("Edit")
+              }
             }
           }
           WorkspaceInfoRow("Account Slot", slotLabel)
@@ -1802,38 +2371,40 @@ private fun WorkspaceTabContent(
       }
     }
 
-    item {
-      Text(
-        text = "Finboss ERP Modules Roadmap",
-        style = MaterialTheme.typography.titleLarge,
-        modifier = Modifier.padding(top = 4.dp),
-      )
-    }
+    if (!isSalesmanSession) {
+      item {
+        Text(
+          text = "Finboss ERP Modules Roadmap",
+          style = MaterialTheme.typography.titleLarge,
+          modifier = Modifier.padding(top = 4.dp),
+        )
+      }
 
-    items(modules, key = { it.id }) { module ->
-      Card(
-        modifier = Modifier.fillMaxWidth().clickable { onSelectModule(module) },
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(14.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
+      items(modules, key = { it.id }) { module ->
+        Card(
+          modifier = Modifier.fillMaxWidth().clickable { onSelectModule(module) },
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         ) {
-          Icon(imageVector = moduleIcon(module.code), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            ModuleStatusBadge(status = module.status)
-            Text(text = module.title, style = MaterialTheme.typography.titleMedium)
-            Text(text = module.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-          }
-          IconButton(onClick = { onTogglePin(module) }) {
-            Icon(
-              imageVector = if (module.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-              contentDescription = if (module.isPinned) "Unpin module" else "Pin module",
-              tint = if (module.isPinned) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+          ) {
+            Icon(imageVector = moduleIcon(module.code), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              ModuleStatusBadge(status = module.status)
+              Text(text = module.title, style = MaterialTheme.typography.titleMedium)
+              Text(text = module.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = { onTogglePin(module) }) {
+              Icon(
+                imageVector = if (module.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                contentDescription = if (module.isPinned) "Unpin module" else "Pin module",
+                tint = if (module.isPinned) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
         }
       }

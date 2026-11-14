@@ -665,3 +665,244 @@ test("Salesman logged in via Phone OTP has strictly owner-decided access and imm
   );
 });
 
+test("Salesman logged in via Instant 6-Digit OTP + Google Session (/salesman_sessions/{uid}) enforces owner permissions and revocation", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const salesmanUid = "google_salesman_uid_99";
+  const salesmanPhone = "+919439772634";
+  const unregisteredPhone = "+919999900000";
+
+  await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).set(validProfile(ALICE_UID)));
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_1")
+      .set(validSalesmanSeat(ALICE_UID, "seat_1", salesmanPhone))
+  );
+  await assertSucceeds(
+    aliceDb.collection("phone_access").doc(salesmanPhone)
+      .set(validPhoneAccessGrant(ALICE_UID, "seat_1", salesmanPhone))
+  );
+
+  // Salesman authenticated via Google Credential Manager (no phone_number claim in token)
+  const salesmanDb = testEnv.authenticatedContext(salesmanUid).firestore();
+
+  // Can look up own registered phone in phone_access, cannot list phone_access
+  await assertSucceeds(salesmanDb.collection("phone_access").doc(salesmanPhone).get());
+  await assertFails(salesmanDb.collection("phone_access").get());
+
+  // Cannot bind salesman_sessions to an unregistered phone number
+  await assertFails(
+    salesmanDb.collection("salesman_sessions").doc(salesmanUid).set({
+      uid: salesmanUid,
+      phoneNumber: unregisteredPhone,
+      ownerUid: ALICE_UID,
+      seatId: "seat_1",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // Can bind salesman_sessions to active registered phone number
+  await assertSucceeds(
+    salesmanDb.collection("salesman_sessions").doc(salesmanUid).set({
+      uid: salesmanUid,
+      phoneNumber: salesmanPhone,
+      ownerUid: ALICE_UID,
+      seatId: "seat_1",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // Now salesman can read allowed collections and create invoices on allowed profile main_1
+  await assertSucceeds(salesmanDb.collection("users").doc(ALICE_UID).get());
+  const invPayload = validInvoice(ALICE_UID, "unpaid", 0);
+  invPayload.businessProfileId = "main_1";
+  await assertSucceeds(
+    salesmanDb.collection("users").doc(ALICE_UID).collection("invoices").doc("s_inv_otp_1").set(invPayload)
+  );
+
+  // When Owner pauses the seat, access is immediately revoked
+  await assertSucceeds(
+    aliceDb.collection("phone_access").doc(salesmanPhone).update({
+      isActive: false,
+      updatedAt: pastTimestamp(),
+    })
+  );
+  await assertFails(
+    salesmanDb.collection("users").doc(ALICE_UID).collection("invoices").get()
+  );
+});
+
+test("Subscription Plan Tiers (30-Day Free Trial, Silver, Gold, Diamond) enforce profile, salesman seat, and E-Invoice/E-Way Bill limits", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const baseProfile = validProfile(ALICE_UID);
+
+  // 1. Silver Plan (₹300/mo): Only 1 business profile (main_1), 0 salesman seats, no E-Invoice/E-Way Bill
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      ...baseProfile,
+      planTier: "silver",
+      billingCycle: "monthly",
+      planAmountPaid: 300,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("business_profiles").doc("main_1")
+      .set({ ...baseProfile, profileMode: "main_gst", planTier: "silver" })
+  );
+  // Silver cannot create 2nd business profile (main_2) or plain_1
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("business_profiles").doc("main_2")
+      .set({ ...baseProfile, profileMode: "main_gst" })
+  );
+  // Silver cannot create salesman seat_1
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_1")
+      .set(validSalesmanSeat(ALICE_UID, "seat_1", "+919876543211"))
+  );
+  // Silver can create standard GST invoice, but cannot generate E-Invoice (IRN) or E-Way Bill
+  const invRef = aliceDb.collection("users").doc(ALICE_UID).collection("invoices").doc("inv_plan_1");
+  await assertSucceeds(invRef.set(validInvoice(ALICE_UID, "paid", 2832)));
+  await assertFails(
+    invRef.update({
+      irn: "a".repeat(64),
+      ackNo: "112600001234567",
+      ackDate: "15/11/2026 10:30:00",
+      signedQrData: "SellerGstin:27AABCS1429B1ZS|Irn:" + "a".repeat(64),
+      einvoiceStatus: "generated",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // 2. Upgrade to Gold Plan (₹500/mo or ₹5,400/yr with 10% discount): Allows up to 2 profiles (main_1, main_2) and 2 salesmen (seat_1, seat_2), but not plain_1, seat_3, or E-Invoice
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      planTier: "gold",
+      billingCycle: "yearly",
+      planAmountPaid: 5400,
+      updatedAt: pastTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("business_profiles").doc("main_2")
+      .set({ ...baseProfile, businessName: "Branch Two", profileMode: "main_gst" })
+  );
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("business_profiles").doc("plain_1")
+      .set({ ...baseProfile, businessName: "Plain Bill", gstin: "", profileMode: "plain_non_gst" })
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_1")
+      .set(validSalesmanSeat(ALICE_UID, "seat_1", "+919876543211"))
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_2")
+      .set(validSalesmanSeat(ALICE_UID, "seat_2", "+919876543212"))
+  );
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_3")
+      .set(validSalesmanSeat(ALICE_UID, "seat_3", "+919876543213"))
+  );
+  await assertFails(
+    invRef.update({
+      ewbNumber: "181234567890",
+      ewbDate: "15/11/2026 10:35 AM",
+      ewbValidUntil: "1 day(s)",
+      transportMode: "road",
+      distanceKm: 148,
+      fromPlace: "Mumbai",
+      fromPincode: "400001",
+      toPlace: "Pune",
+      toPincode: "411001",
+      vehicleNumber: "MH-12-AB-1234",
+      vehicleType: "regular",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // 3. Upgrade to Diamond Plan (₹700/mo or ₹6,720/yr with 20% discount): Unlocks all 3 profiles, all 5 salesmen, and E-Invoice + E-Way Bill
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      planTier: "diamond",
+      billingCycle: "yearly",
+      planAmountPaid: 6720,
+      updatedAt: pastTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("business_profiles").doc("plain_1")
+      .set({ ...baseProfile, businessName: "Plain Bill", gstin: "", profileMode: "plain_non_gst" })
+  );
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("salesmen").doc("seat_3")
+      .set(validSalesmanSeat(ALICE_UID, "seat_3", "+919876543213"))
+  );
+});
+
+test("GST Portal E-Invoice (IRN & Signed QR) and E-Way Bill (Transport & Distance KM) generation and schema validation", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const baseProfile = validProfile(ALICE_UID);
+
+  // New user with 30-Day Free Trial ("trial") has full Diamond access
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      ...baseProfile,
+      planTier: "trial",
+      billingCycle: "trial",
+      trialStartedAtMs: Date.now() - 1000,
+      planExpiresAtMs: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      planAmountPaid: 0,
+    })
+  );
+
+  const invRef = aliceDb.collection("users").doc(ALICE_UID).collection("invoices").doc("inv_einvoice_1");
+  await assertSucceeds(invRef.set(validInvoice(ALICE_UID, "paid", 2832)));
+
+  // Generate E-Invoice (IRN, Ack No, Ack Date, Signed QR) on paid B2B GST invoice succeeds
+  await assertSucceeds(
+    invRef.update({
+      irn: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      ackNo: "112699887766554",
+      ackDate: "15/11/2026 11:20:00",
+      signedQrData: "SellerGstin:27AABCS1429B1ZS|BuyerGstin:27AABCA1234B1Z5|DocNo:FB-2026-001|TotInvVal:2832.00",
+      einvoiceStatus: "generated",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // Generate E-Way Bill with Transport Mode, Distance KM, From/To City & PIN, and Vehicle No succeeds
+  await assertSucceeds(
+    invRef.update({
+      ewbNumber: "181029384756",
+      ewbDate: "15/11/2026 11:25 AM",
+      ewbValidUntil: "1 day(s) • Until 16/11/2026 11:25 AM",
+      transportMode: "road",
+      distanceKm: 150,
+      fromPlace: "Mumbai",
+      fromPincode: "400001",
+      toPlace: "Pune",
+      toPincode: "411001",
+      vehicleNumber: "MH-12-AB-1234",
+      vehicleType: "regular",
+      transporterName: "VRL Logistics Ltd",
+      transporterId: "27AABCV1234F1Z2",
+      transporterDocNo: "LR-2026-998",
+      transporterDocDate: "15/11/2026",
+      updatedAt: pastTimestamp(),
+    })
+  );
+
+  // Invalid transportMode or out-of-range distanceKm (> 4000 km) is rejected
+  await assertFails(
+    invRef.update({
+      transportMode: "hyperloop",
+      updatedAt: pastTimestamp(),
+    })
+  );
+  await assertFails(
+    invRef.update({
+      distanceKm: 9500,
+      updatedAt: pastTimestamp(),
+    })
+  );
+});
+
+
+

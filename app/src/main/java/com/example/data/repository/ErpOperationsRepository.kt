@@ -900,6 +900,105 @@ class ErpOperationsRepository(
     }
   }
 
+  suspend fun saveInvoiceEInvoiceDetails(
+    invoice: GstInvoice,
+    result: com.example.data.reference.EInvoiceGenerationResult,
+  ): Result<Unit> {
+    val uid = requireUserId()
+    require(invoice.id.isNotBlank()) { "Invoice ID required for E-Invoice generation" }
+    val invoiceRef =
+      db.collection("users").document(uid).collection("invoices").document(invoice.id)
+    return try {
+      require(invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
+        "Plain Non-GST bills cannot generate GST Portal E-Invoices"
+      }
+      val updates =
+        mapOf(
+          "irn" to result.irn.trim().take(64),
+          "ackNo" to result.ackNo.trim().take(30),
+          "ackDate" to result.ackDate.trim().take(40),
+          "signedQrData" to result.signedQrData.trim().take(600),
+          "einvoiceStatus" to "generated",
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
+      invoiceRef.update(updates).awaitOfflineAware()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, invoiceRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun cancelInvoiceEInvoice(invoice: GstInvoice): Result<Unit> {
+    val uid = requireUserId()
+    require(invoice.id.isNotBlank()) { "Invoice ID required" }
+    val invoiceRef =
+      db.collection("users").document(uid).collection("invoices").document(invoice.id)
+    return try {
+      val updates =
+        mapOf(
+          "einvoiceStatus" to "cancelled",
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
+      invoiceRef.update(updates).awaitOfflineAware()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, invoiceRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun saveInvoiceEWayBillDetails(
+    invoice: GstInvoice,
+    result: com.example.data.reference.EWayBillGenerationResult,
+  ): Result<Unit> {
+    val uid = requireUserId()
+    require(invoice.id.isNotBlank()) { "Invoice ID required for E-Way Bill generation" }
+    val invoiceRef =
+      db.collection("users").document(uid).collection("invoices").document(invoice.id)
+    return try {
+      require(invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
+        "Plain Non-GST bills cannot generate GST E-Way Bills"
+      }
+      val input = result.transportInput
+      val cleanMode =
+        input.transportMode.lowercase().takeIf { it in listOf("road", "rail", "air", "ship") }
+          ?: "road"
+      val cleanVehType =
+        input.vehicleType.lowercase().takeIf { it in listOf("regular", "odc") } ?: "regular"
+      val updates =
+        mapOf(
+          "ewbNumber" to result.ewbNumber.trim().take(20),
+          "ewbDate" to result.ewbDate.trim().take(40),
+          "ewbValidUntil" to result.ewbValidUntil.trim().take(60),
+          "transportMode" to cleanMode,
+          "distanceKm" to input.distanceKm.coerceIn(1, 4000),
+          "fromPlace" to input.fromPlace.trim().take(80),
+          "fromPincode" to input.fromPincode.trim().take(12),
+          "toPlace" to input.toPlace.trim().take(80),
+          "toPincode" to input.toPincode.trim().take(12),
+          "vehicleNumber" to input.vehicleNumber.trim().uppercase().take(25),
+          "vehicleType" to cleanVehType,
+          "transporterName" to input.transporterName.trim().take(100),
+          "transporterId" to input.transporterId.trim().uppercase().take(30),
+          "transporterDocNo" to input.transporterDocNo.trim().take(40),
+          "transporterDocDate" to input.transporterDocDate.trim().take(30),
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
+      invoiceRef.update(updates).awaitOfflineAware()
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, invoiceRef.path)
+      Result.failure(e)
+    }
+  }
+
   suspend fun deleteInvoice(
     invoice: GstInvoice,
     inventorySnapshot: List<InventoryItem> = emptyList(),

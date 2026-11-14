@@ -177,6 +177,8 @@ class ErpDashboardRepository(
     return try {
       val existingProfile = userDocRef.get().await()
       val safeName = ownerName.trim().ifBlank { "Business Owner" }.take(80)
+      val nowMs = System.currentTimeMillis()
+      val trialEndMs = nowMs + com.example.data.model.SubscriptionTier.TRIAL_DURATION_MS
       if (!existingProfile.exists()) {
         val profilePayload =
           buildMap<String, Any> {
@@ -191,10 +193,28 @@ class ErpDashboardRepository(
             put("fiscalYearLabel", "FY 2026-27")
             put("businessType", "Retail & Wholesale")
             put("monthlySalesTarget", 250000.0)
+            put("planTier", com.example.data.model.SubscriptionTier.TRIAL.key)
+            put("billingCycle", com.example.data.model.SubscriptionTier.CYCLE_TRIAL)
+            put("trialStartedAtMs", nowMs)
+            put("planExpiresAtMs", trialEndMs)
+            put("planAmountPaid", 0.0)
             put("createdAt", FieldValue.serverTimestamp())
             put("updatedAt", FieldValue.serverTimestamp())
           }
         userDocRef.set(profilePayload).await()
+      } else if (existingProfile.getString("planTier").isNullOrBlank()) {
+        userDocRef
+          .update(
+            mapOf(
+              "planTier" to com.example.data.model.SubscriptionTier.TRIAL.key,
+              "billingCycle" to com.example.data.model.SubscriptionTier.CYCLE_TRIAL,
+              "trialStartedAtMs" to nowMs,
+              "planExpiresAtMs" to trialEndMs,
+              "planAmountPaid" to 0.0,
+              "updatedAt" to FieldValue.serverTimestamp(),
+            )
+          )
+          .await()
       }
 
       val existingMain1 = main1Ref.get().await()
@@ -210,6 +230,15 @@ class ErpDashboardRepository(
         val seedType = rootSnap.getString("businessType")?.ifBlank { "Retail & Wholesale" }
           ?: "Retail & Wholesale"
         val seedTarget = rootSnap.getDouble("monthlySalesTarget") ?: 250000.0
+        val seedTier =
+          rootSnap.getString("planTier")?.ifBlank { com.example.data.model.SubscriptionTier.TRIAL.key }
+            ?: com.example.data.model.SubscriptionTier.TRIAL.key
+        val seedCycle =
+          rootSnap.getString("billingCycle")?.ifBlank { com.example.data.model.SubscriptionTier.CYCLE_TRIAL }
+            ?: com.example.data.model.SubscriptionTier.CYCLE_TRIAL
+        val seedTrialStart = rootSnap.getLong("trialStartedAtMs")?.takeIf { it > 0L } ?: nowMs
+        val seedPlanExpires = rootSnap.getLong("planExpiresAtMs")?.takeIf { it > 0L } ?: trialEndMs
+        val seedAmountPaid = rootSnap.getDouble("planAmountPaid") ?: 0.0
 
         val slotPayload =
           buildMap<String, Any> {
@@ -225,6 +254,11 @@ class ErpDashboardRepository(
             put("businessType", seedType.take(40))
             put("monthlySalesTarget", seedTarget.coerceIn(0.0, 1_000_000_000.0))
             put("profileMode", BusinessProfile.MODE_MAIN_GST)
+            put("planTier", seedTier)
+            put("billingCycle", seedCycle)
+            put("trialStartedAtMs", seedTrialStart)
+            put("planExpiresAtMs", seedPlanExpires)
+            put("planAmountPaid", seedAmountPaid)
             put("createdAt", FieldValue.serverTimestamp())
             put("updatedAt", FieldValue.serverTimestamp())
           }
@@ -458,6 +492,89 @@ class ErpDashboardRepository(
       throw e
     } catch (e: Exception) {
       handleFirestoreError(e, OperationType.DELETE, slotRef.path)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun activateSubscriptionPlan(
+    tier: com.example.data.model.SubscriptionTier,
+    billingCycle: String,
+  ): Result<Unit> {
+    val uid = requireUserId()
+    val userDocRef = db.collection("users").document(uid)
+    val profilesColRef = userDocRef.collection("business_profiles")
+    return try {
+      val nowMs = System.currentTimeMillis()
+      val cleanCycle =
+        when {
+          tier == com.example.data.model.SubscriptionTier.TRIAL ->
+            com.example.data.model.SubscriptionTier.CYCLE_TRIAL
+          billingCycle.equals(com.example.data.model.SubscriptionTier.CYCLE_YEARLY, ignoreCase = true) ->
+            com.example.data.model.SubscriptionTier.CYCLE_YEARLY
+          else -> com.example.data.model.SubscriptionTier.CYCLE_MONTHLY
+        }
+      val durationMs =
+        when (cleanCycle) {
+          com.example.data.model.SubscriptionTier.CYCLE_YEARLY ->
+            com.example.data.model.SubscriptionTier.YEARLY_DURATION_MS
+          com.example.data.model.SubscriptionTier.CYCLE_TRIAL ->
+            com.example.data.model.SubscriptionTier.TRIAL_DURATION_MS
+          else -> com.example.data.model.SubscriptionTier.MONTHLY_DURATION_MS
+        }
+      val expiresMs = nowMs + durationMs
+      val amountPaid =
+        when {
+          tier == com.example.data.model.SubscriptionTier.TRIAL -> 0.0
+          cleanCycle == com.example.data.model.SubscriptionTier.CYCLE_YEARLY ->
+            tier.yearlyTotalInr.toDouble()
+          else -> tier.monthlyPriceInr.toDouble()
+        }
+
+      val planUpdates =
+        mapOf(
+          "planTier" to tier.key,
+          "billingCycle" to cleanCycle,
+          "trialStartedAtMs" to nowMs,
+          "planExpiresAtMs" to expiresMs,
+          "planAmountPaid" to amountPaid,
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
+
+      val rootSnap = userDocRef.get().await()
+      if (rootSnap.exists()) {
+        userDocRef.update(planUpdates).awaitOfflineAware()
+      } else {
+        val safeName = auth.currentUser?.displayName?.ifBlank { "Business Owner" } ?: "Business Owner"
+        val createPayload =
+          buildMap<String, Any> {
+            put("userId", uid)
+            put("ownerName", safeName.take(80))
+            put("businessName", "$safeName Enterprise".take(100))
+            put("gstin", "")
+            put("currencySymbol", "₹")
+            put("fiscalYearLabel", "FY 2026-27")
+            put("businessType", "Retail & Wholesale")
+            put("monthlySalesTarget", 250000.0)
+            putAll(planUpdates)
+            put("createdAt", FieldValue.serverTimestamp())
+          }
+        userDocRef.set(createPayload).awaitOfflineAware()
+      }
+
+      val existingSlots = profilesColRef.get().await()
+      if (!existingSlots.isEmpty) {
+        val batch = db.batch()
+        existingSlots.documents.forEach { doc ->
+          batch.update(doc.reference, planUpdates)
+        }
+        batch.commit().awaitOfflineAware()
+      }
+
+      Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      handleFirestoreError(e, OperationType.UPDATE, userDocRef.path)
       Result.failure(e)
     }
   }

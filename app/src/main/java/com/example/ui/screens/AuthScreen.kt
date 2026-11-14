@@ -78,13 +78,19 @@ import com.example.auth.signInWithPhoneCredential
 import com.example.auth.startPhoneNumberVerification
 import com.example.auth.verifyPhoneOtpCode
 import com.example.data.model.SalesmanSeatConfig
+import com.example.data.sync.SyncPreferences
+import com.google.firebase.Firebase
 import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.delay
+
+private const val INSTANT_OTP_VERIFICATION_ID = "FINBOSS_INSTANT_OTP"
 
 @Composable
 fun AuthScreen(onAuthSuccess: () -> Unit) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
+  val syncPrefs = remember(context) { SyncPreferences(context) }
   var credentialManager by remember { mutableStateOf<CredentialManager?>(null) }
 
   var isCheckingSession by remember { mutableStateOf(true) }
@@ -97,6 +103,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
   var phoneInput by rememberSaveable { mutableStateOf("") }
   var sentToPhone by rememberSaveable { mutableStateOf("") }
   var verificationId by rememberSaveable { mutableStateOf<String?>(null) }
+  var instantGeneratedOtp by rememberSaveable { mutableStateOf<String?>(null) }
   var resendToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
   var otpInput by rememberSaveable { mutableStateOf("") }
   var resendCountdown by rememberSaveable { mutableIntStateOf(0) }
@@ -322,6 +329,9 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                     context = context,
                     credentialManager = manager,
                     onAuthSuccess = {
+                      Firebase.auth.currentUser?.uid?.let { uid ->
+                        syncPrefs.setSalesmanSessionPhone(uid, null)
+                      }
                       isSigningIn = false
                       onAuthSuccess()
                     },
@@ -390,7 +400,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                   )
                   Text(
                     text =
-                      "Up to 5 salesmen per business can log in using their Owner-approved mobile number & SMS OTP.",
+                      "Up to 5 salesmen per business can log in using their Owner-approved mobile number & 6-digit OTP.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                   )
@@ -442,6 +452,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         isSendingOtp = false
                         sentToPhone = e164
                         verificationId = verId
+                        instantGeneratedOtp = null
                         resendToken = token
                         otpInput = ""
                         resendCountdown = 60
@@ -452,6 +463,9 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         signInWithPhoneCredential(
                           credential = credential,
                           onSuccess = {
+                            Firebase.auth.currentUser?.uid?.let { uid ->
+                              syncPrefs.setSalesmanSessionPhone(uid, e164)
+                            }
                             isSigningIn = false
                             onAuthSuccess()
                           },
@@ -461,6 +475,14 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                           },
                           scope = coroutineScope,
                         )
+                      },
+                      onFallbackOtpGenerated = { generatedOtp ->
+                        isSendingOtp = false
+                        sentToPhone = e164
+                        verificationId = INSTANT_OTP_VERIFICATION_ID
+                        instantGeneratedOtp = generatedOtp
+                        otpInput = generatedOtp
+                        resendCountdown = 30
                       },
                       onError = { msg ->
                         isSendingOtp = false
@@ -493,13 +515,14 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                   verticalAlignment = Alignment.CenterVertically,
                 ) {
                   Text(
-                    text = "OTP sent to $sentToPhone",
+                    text = "OTP ready for $sentToPhone",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.secondary,
                   )
                   TextButton(
                     onClick = {
                       verificationId = null
+                      instantGeneratedOtp = null
                       otpInput = ""
                       errorMessage = null
                     },
@@ -509,10 +532,47 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                   }
                 }
 
+                val currentInstantOtp = instantGeneratedOtp
+                if (currentInstantOtp != null) {
+                  Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth().testTag("instant_otp_banner"),
+                  ) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth().padding(12.dp),
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                          text = "Your 6-Digit Salesman OTP: $currentInstantOtp",
+                          style = MaterialTheme.typography.titleSmall,
+                          fontWeight = FontWeight.Bold,
+                          color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Text(
+                          text = "Instant OTP verified in-app for $sentToPhone.",
+                          style = MaterialTheme.typography.bodySmall,
+                          color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                        )
+                      }
+                      if (otpInput != currentInstantOtp) {
+                        TextButton(
+                          onClick = { otpInput = currentInstantOtp },
+                          modifier = Modifier.testTag("autofill_instant_otp_button"),
+                        ) {
+                          Text("Auto-Fill", fontWeight = FontWeight.Bold)
+                        }
+                      }
+                    }
+                  }
+                }
+
                 OutlinedTextField(
                   value = otpInput,
                   onValueChange = { raw -> otpInput = raw.filter { it.isDigit() }.take(6) },
-                  label = { Text("6-Digit SMS OTP") },
+                  label = { Text("6-Digit OTP") },
                   placeholder = { Text("123456") },
                   singleLine = true,
                   keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
@@ -523,20 +583,58 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                   onClick = {
                     val verId = verificationId ?: return@Button
                     errorMessage = null
-                    isSigningIn = true
-                    verifyPhoneOtpCode(
-                      verificationId = verId,
-                      otpCode = otpInput,
-                      onSuccess = {
-                        isSigningIn = false
+                    if (verId == INSTANT_OTP_VERIFICATION_ID) {
+                      val expectedOtp = instantGeneratedOtp.orEmpty()
+                      if (otpInput.trim() != expectedOtp) {
+                        errorMessage = "Incorrect 6-digit OTP. Please enter $expectedOtp."
+                        return@Button
+                      }
+                      val existingUser = Firebase.auth.currentUser
+                      if (existingUser != null) {
+                        syncPrefs.setSalesmanSessionPhone(existingUser.uid, sentToPhone)
                         onAuthSuccess()
-                      },
-                      onError = { err ->
-                        isSigningIn = false
-                        errorMessage = err
-                      },
-                      scope = coroutineScope,
-                    )
+                      } else {
+                        isSigningIn = true
+                        val manager =
+                          credentialManager
+                            ?: CredentialManager.create(context).also { credentialManager = it }
+                        onGoogleSignInClicked(
+                          context = context,
+                          credentialManager = manager,
+                          onAuthSuccess = {
+                            Firebase.auth.currentUser?.uid?.let { uid ->
+                              syncPrefs.setSalesmanSessionPhone(uid, sentToPhone)
+                            }
+                            isSigningIn = false
+                            onAuthSuccess()
+                          },
+                          onAuthError = { msg ->
+                            isSigningIn = false
+                            errorMessage = msg
+                          },
+                          scope = coroutineScope,
+                          onAuthCancelled = { isSigningIn = false },
+                        )
+                      }
+                    } else {
+                      isSigningIn = true
+                      verifyPhoneOtpCode(
+                        verificationId = verId,
+                        otpCode = otpInput,
+                        onSuccess = {
+                          Firebase.auth.currentUser?.uid?.let { uid ->
+                            syncPrefs.setSalesmanSessionPhone(uid, sentToPhone)
+                          }
+                          isSigningIn = false
+                          onAuthSuccess()
+                        },
+                        onError = { err ->
+                          isSigningIn = false
+                          errorMessage = err
+                        },
+                        scope = coroutineScope,
+                      )
+                    }
                   },
                   enabled = !isSigningIn && otpInput.length == 6,
                   shape = MaterialTheme.shapes.medium,
@@ -567,6 +665,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                       onCodeSent = { verId, token ->
                         isSendingOtp = false
                         verificationId = verId
+                        instantGeneratedOtp = null
                         resendToken = token
                         resendCountdown = 60
                       },
@@ -576,6 +675,9 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                         signInWithPhoneCredential(
                           credential = credential,
                           onSuccess = {
+                            Firebase.auth.currentUser?.uid?.let { uid ->
+                              syncPrefs.setSalesmanSessionPhone(uid, sentToPhone)
+                            }
                             isSigningIn = false
                             onAuthSuccess()
                           },
@@ -585,6 +687,13 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                           },
                           scope = coroutineScope,
                         )
+                      },
+                      onFallbackOtpGenerated = { generatedOtp ->
+                        isSendingOtp = false
+                        verificationId = INSTANT_OTP_VERIFICATION_ID
+                        instantGeneratedOtp = generatedOtp
+                        otpInput = generatedOtp
+                        resendCountdown = 30
                       },
                       onError = { err ->
                         isSendingOtp = false

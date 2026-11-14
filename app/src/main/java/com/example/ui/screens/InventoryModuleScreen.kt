@@ -108,6 +108,7 @@ fun InventoryModuleContent(
   showAddItemDialog: Boolean,
   onDismissAddItemDialog: () -> Unit,
   onOpenAddItemDialog: () -> Unit,
+  canManageStock: Boolean = true,
 ) {
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var stockFilter by rememberSaveable { mutableStateOf("all") }
@@ -167,26 +168,28 @@ fun InventoryModuleContent(
       }
     }
 
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-      ) {
-        Button(
-          onClick = { showAddPurchaseDialog = true },
-          modifier = Modifier.weight(1f).testTag("inventory_add_purchase_button"),
+    if (canManageStock) {
+      item {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          Icon(Icons.Filled.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Add Purchase")
-        }
-        OutlinedButton(
-          onClick = onOpenAddItemDialog,
-          modifier = Modifier.weight(1f).testTag("inventory_quick_add_sku_button"),
-        ) {
-          Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(modifier = Modifier.width(6.dp))
-          Text("Add Item SKU")
+          Button(
+            onClick = { showAddPurchaseDialog = true },
+            modifier = Modifier.weight(1f).testTag("inventory_add_purchase_button"),
+          ) {
+            Icon(Icons.Filled.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Add Purchase")
+          }
+          OutlinedButton(
+            onClick = onOpenAddItemDialog,
+            modifier = Modifier.weight(1f).testTag("inventory_quick_add_sku_button"),
+          ) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Add Item SKU")
+          }
         }
       }
     }
@@ -252,8 +255,8 @@ fun InventoryModuleContent(
                   else
                     "Add your products with sale price, GST %, and stock levels for instant billing auto-deduction."
                 } else "Try adjusting your search or stock filter.",
-              actionLabel = "Add SKU Item",
-              onAction = onOpenAddItemDialog,
+              actionLabel = if (canManageStock) "Add SKU Item" else null,
+              onAction = if (canManageStock) onOpenAddItemDialog else null,
             )
           }
         } else {
@@ -262,6 +265,7 @@ fun InventoryModuleContent(
               item = item,
               currency = currency,
               isPlainNonGst = isPlainNonGst,
+              canManageStock = canManageStock,
               onQuickIncrement = { onAdjustStock(item, 1.0) {} },
               onQuickDecrement = { onAdjustStock(item, -1.0) {} },
               onAdjustCustom = { adjustItem = item },
@@ -338,6 +342,7 @@ private fun InventoryItemCard(
   item: InventoryItem,
   currency: String,
   isPlainNonGst: Boolean,
+  canManageStock: Boolean = true,
   onQuickIncrement: () -> Unit,
   onQuickDecrement: () -> Unit,
   onAdjustCustom: () -> Unit,
@@ -426,33 +431,35 @@ private fun InventoryItemCard(
         }
       }
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          IconButton(onClick = onQuickDecrement, enabled = item.stockQty > 0.0) {
-            Icon(Icons.Filled.Remove, contentDescription = "Decrease stock")
+      if (canManageStock) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(onClick = onQuickDecrement, enabled = item.stockQty > 0.0) {
+              Icon(Icons.Filled.Remove, contentDescription = "Decrease stock")
+            }
+            OutlinedButton(onClick = onAdjustCustom) {
+              Text("Adjust")
+            }
+            IconButton(onClick = onQuickIncrement) {
+              Icon(Icons.Filled.Add, contentDescription = "Increase stock")
+            }
           }
-          OutlinedButton(onClick = onAdjustCustom) {
-            Text("Adjust")
-          }
-          IconButton(onClick = onQuickIncrement) {
-            Icon(Icons.Filled.Add, contentDescription = "Increase stock")
-          }
-        }
-        Row {
-          IconButton(onClick = onEdit) {
-            Icon(Icons.Filled.Edit, contentDescription = "Edit SKU", modifier = Modifier.size(18.dp))
-          }
-          IconButton(onClick = onDelete) {
-            Icon(
-              Icons.Filled.DeleteOutline,
-              contentDescription = "Delete SKU",
-              tint = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.size(18.dp),
-            )
+          Row {
+            IconButton(onClick = onEdit) {
+              Icon(Icons.Filled.Edit, contentDescription = "Edit SKU", modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onDelete) {
+              Icon(
+                Icons.Filled.DeleteOutline,
+                contentDescription = "Delete SKU",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+              )
+            }
           }
         }
       }

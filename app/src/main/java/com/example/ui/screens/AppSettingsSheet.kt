@@ -21,9 +21,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
-import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -78,6 +80,24 @@ fun AppSettingsSheet(
   }
   var creditLimitDraft by remember(settings.defaultPartyCreditLimit) {
     mutableStateOf(settings.defaultPartyCreditLimit.toLong().toString())
+  }
+  var gstPortalGstinDraft by remember(settings.gstPortalGstin) {
+    mutableStateOf(settings.gstPortalGstin)
+  }
+  var gstPortalUsernameDraft by remember(settings.gstPortalUsername) {
+    mutableStateOf(settings.gstPortalUsername)
+  }
+  var gstPortalClientIdDraft by remember(settings.gstPortalClientId) {
+    mutableStateOf(settings.gstPortalClientId)
+  }
+  var dispatchCityDraft by remember(settings.defaultDispatchCity) {
+    mutableStateOf(settings.defaultDispatchCity)
+  }
+  var transporterNameDraft by remember(settings.defaultTransporterName) {
+    mutableStateOf(settings.defaultTransporterName)
+  }
+  var transporterIdDraft by remember(settings.defaultTransporterId) {
+    mutableStateOf(settings.defaultTransporterId)
   }
 
   ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -237,7 +257,7 @@ fun AppSettingsSheet(
 
       // 2. BILLING & GST RULES
       SettingsSectionCard(
-        icon = Icons.Filled.ReceiptLong,
+        icon = Icons.AutoMirrored.Filled.ReceiptLong,
         title = "Billing & GST Logic",
       ) {
         OutlinedTextField(
@@ -304,6 +324,115 @@ fun AppSettingsSheet(
               label = { Text(label) },
             )
           }
+        }
+      }
+
+      // 2B. GST PORTAL E-INVOICE (IRP) & E-WAY BILL INTEGRATION
+      if (!isPlainNonGst) {
+        SettingsSectionCard(
+          icon = Icons.Filled.QrCode2,
+          title = "GST Portal E-Invoice & E-Way Bill API",
+        ) {
+          Text(
+            text = "NIC GST Portal / GSP Connection Mode",
+            style = MaterialTheme.typography.labelLarge,
+          )
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+              "sandbox" to "Sandbox IRP (Test)",
+              "live" to "Live NIC GSP API",
+              "offline_json" to "Offline NIC JSON Export",
+            ).forEach { (modeKey, modeLabel) ->
+              FilterChip(
+                selected = settings.gstPortalMode == modeKey,
+                onClick = { onUpdateSettings { it.copy(gstPortalMode = modeKey) } },
+                label = { Text(modeLabel) },
+                modifier = Modifier.testTag("settings_gst_portal_mode_$modeKey"),
+              )
+            }
+          }
+
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+              value = gstPortalGstinDraft,
+              onValueChange = { raw ->
+                val clean = raw.uppercase().take(15)
+                gstPortalGstinDraft = clean
+                onUpdateSettings { it.copy(gstPortalGstin = clean) }
+              },
+              label = { Text("Seller Portal GSTIN") },
+              placeholder = { Text("27AABCF9012R1Z5") },
+              singleLine = true,
+              modifier = Modifier.weight(1f).testTag("settings_gst_portal_gstin_input"),
+            )
+            OutlinedTextField(
+              value = gstPortalUsernameDraft,
+              onValueChange = { raw ->
+                val clean = raw.trim().take(50)
+                gstPortalUsernameDraft = clean
+                onUpdateSettings { it.copy(gstPortalUsername = clean) }
+              },
+              label = { Text("IRP / EWB API Username") },
+              placeholder = { Text("API_USER_01") },
+              singleLine = true,
+              modifier = Modifier.weight(1f).testTag("settings_gst_portal_user_input"),
+            )
+          }
+
+          OutlinedTextField(
+            value = gstPortalClientIdDraft,
+            onValueChange = { raw ->
+              val clean = raw.trim().take(60)
+              gstPortalClientIdDraft = clean
+              onUpdateSettings { it.copy(gstPortalClientId = clean) }
+            },
+            label = { Text("GSP Client ID / ERP Bridge Key (Optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("settings_gst_portal_client_id_input"),
+          )
+
+          HorizontalDivider()
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Filled.LocalShipping, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Text("Default E-Way Bill Dispatch & Transporter", style = MaterialTheme.typography.labelLarge)
+          }
+
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+              value = dispatchCityDraft,
+              onValueChange = { raw ->
+                dispatchCityDraft = raw.take(60)
+                onUpdateSettings { it.copy(defaultDispatchCity = raw.trim().take(60)) }
+              },
+              label = { Text("Default From City") },
+              placeholder = { Text("Bhubaneswar / Mumbai") },
+              singleLine = true,
+              modifier = Modifier.weight(1f).testTag("settings_default_dispatch_city_input"),
+            )
+            OutlinedTextField(
+              value = transporterNameDraft,
+              onValueChange = { raw ->
+                transporterNameDraft = raw.take(80)
+                onUpdateSettings { it.copy(defaultTransporterName = raw.trim().take(80)) }
+              },
+              label = { Text("Default Transporter") },
+              placeholder = { Text("VRL Logistics") },
+              singleLine = true,
+              modifier = Modifier.weight(1f).testTag("settings_default_transporter_name_input"),
+            )
+          }
+
+          OutlinedTextField(
+            value = transporterIdDraft,
+            onValueChange = { raw ->
+              val clean = raw.uppercase().take(15)
+              transporterIdDraft = clean
+              onUpdateSettings { it.copy(defaultTransporterId = clean) }
+            },
+            label = { Text("Default Transporter ID / GSTIN (15-char)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("settings_default_transporter_id_input"),
+          )
         }
       }
 

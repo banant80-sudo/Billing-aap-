@@ -68,20 +68,54 @@ class TeamRepository(
   }
 
   fun observeMyPhoneAccess(phoneNumber: String): Flow<PhoneAccessGrant?> = flow {
-    if (!SalesmanSeatConfig.isValidE164(phoneNumber)) {
+    val cleanPhone = phoneNumber.trim()
+    if (!SalesmanSeatConfig.isValidE164(cleanPhone)) {
       emit(null)
       return@flow
     }
-    val docRef = db.collection("phone_access").document(phoneNumber.trim())
+    val docRef = db.collection("phone_access").document(cleanPhone)
     emitAll(
       docRef
         .snapshots(MetadataChanges.INCLUDE)
         .map { snapshot ->
           if (snapshot.exists()) {
-            snapshot.toObject(
-              PhoneAccessGrant::class.java,
-              DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
-            )
+            val grant =
+              snapshot.toObject(
+                PhoneAccessGrant::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE,
+              )
+            val currentUser = auth.currentUser
+            val currentUid = currentUser?.uid
+            if (
+              grant != null &&
+                grant.isActive &&
+                grant.ownerUid.isNotBlank() &&
+                !currentUid.isNullOrBlank()
+            ) {
+              val hasPhoneToken =
+                currentUser.providerData.any {
+                  it.providerId == com.google.firebase.auth.PhoneAuthProvider.PROVIDER_ID
+                } && !currentUser.phoneNumber.isNullOrBlank()
+              if (!hasPhoneToken) {
+                try {
+                  db.collection("salesman_sessions")
+                    .document(currentUid)
+                    .set(
+                      mapOf(
+                        "uid" to currentUid,
+                        "phoneNumber" to cleanPhone,
+                        "ownerUid" to grant.ownerUid,
+                        "seatId" to grant.seatId.ifBlank { "seat_1" },
+                        "updatedAt" to FieldValue.serverTimestamp(),
+                      )
+                    )
+                    .await()
+                } catch (_: Exception) {
+                  // Offline or transient; cached session or next snapshot will retry.
+                }
+              }
+            }
+            grant
           } else {
             null
           }
@@ -148,23 +182,7 @@ class TeamRepository(
     val previousPhone = existingSeat?.phoneNumber?.trim()?.takeIf { it.isNotBlank() }
 
     return try {
-      val ownedExistingGrant =
-        try {
-          grantRef.get().await().takeIf { it.exists() }
-        } catch (e: FirebaseFirestoreException) {
-          if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-            null
-          } else {
-            throw e
-          }
-        }
-
-      if (ownedExistingGrant != null && ownedExistingGrant.getString("ownerUid") != ownerUid) {
-        return Result.failure(
-          IllegalArgumentException("This mobile number is already registered with another business")
-        )
-      }
-
+      val isSamePhoneUpdate = existingSeat != null && previousPhone == cleanPhone
       val batch = db.batch()
       if (existingSeat != null) {
         batch.update(
@@ -202,7 +220,7 @@ class TeamRepository(
         batch.delete(oldGrantRef)
       }
 
-      if (ownedExistingGrant != null) {
+      if (isSamePhoneUpdate) {
         batch.update(
           grantRef,
           mapOf(
@@ -236,7 +254,7 @@ class TeamRepository(
       try {
         batch.commit().await()
       } catch (e: FirebaseFirestoreException) {
-        if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && ownedExistingGrant == null) {
+        if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && !isSamePhoneUpdate) {
           val conflictErr =
             IllegalArgumentException("This mobile number is already registered with another business")
           return Result.failure(conflictErr)
@@ -306,11 +324,7 @@ class TeamRepository(
       batch.delete(seatRef)
       if (SalesmanSeatConfig.isValidE164(cleanPhone)) {
         val grantRef = db.collection("phone_access").document(cleanPhone)
-        val grantSnap =
-          runCatching { grantRef.get().await() }.getOrNull()
-        if (grantSnap != null && grantSnap.exists() && grantSnap.getString("ownerUid") == ownerUid) {
-          batch.delete(grantRef)
-        }
+        batch.delete(grantRef)
       }
       batch.commit().await()
       Result.success(Unit)

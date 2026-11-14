@@ -18,14 +18,15 @@ class ErpDashboardRepositoryRuleTest : FirestoreEmulatorTestBase() {
 
   @Test
   fun ensureWorkspaceInitialized_authenticatedOwner_createsProfileAndModules() = runBlocking {
-    val uid = signInTestUser(ALICE_EMAIL)
+    val freshEmail = "alice_init_${UUID.randomUUID().toString().take(6)}@test.com"
+    val uid = signInTestUser(freshEmail)
     val repo = ErpDashboardRepository(firestore, auth)
 
     val initResult =
       withTimeout(DEFAULT_TIMEOUT_MS) {
-        repo.ensureWorkspaceInitialized("Alice Traders", ALICE_EMAIL)
+        repo.ensureWorkspaceInitialized("Alice Traders", freshEmail)
       }
-    assertTrue(initResult.isSuccess)
+    assertTrue("initResult failed: ${initResult.exceptionOrNull()}", initResult.isSuccess)
 
     val profile =
       withTimeout(FLOW_TIMEOUT_MS) {
@@ -225,6 +226,138 @@ class ErpDashboardRepositoryRuleTest : FirestoreEmulatorTestBase() {
     assertNotNull(error)
     val fsErr = error?.unwrapFirestoreException()
     assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, fsErr?.code)
+  }
+
+  @Test
+  fun activateSubscriptionPlan_switchesBetweenTrialSilverGoldDiamond_andEnforcesSlotRules() = runBlocking {
+    val subEmail = "alice_sub_${UUID.randomUUID().toString().take(6)}@test.com"
+    val uid = signInTestUser(subEmail)
+    val repo = ErpDashboardRepository(firestore, auth)
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.ensureWorkspaceInitialized("Alice Subscription Owner", subEmail)
+    }
+
+    val initialProfile =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeBusinessProfile().first { it != null && it.userId == uid }
+      }
+    assertNotNull(initialProfile)
+    assertEquals(com.example.data.model.SubscriptionTier.TRIAL.key, initialProfile?.planTier)
+    assertEquals(com.example.data.model.SubscriptionTier.CYCLE_TRIAL, initialProfile?.billingCycle)
+
+    // Activate Silver Monthly (₹300) -> secondary slot main_2 must be blocked by Firestore rules
+    val silverRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.activateSubscriptionPlan(
+          tier = com.example.data.model.SubscriptionTier.SILVER,
+          billingCycle = com.example.data.model.SubscriptionTier.CYCLE_MONTHLY,
+        )
+      }
+    assertTrue("Silver activation failed: ${silverRes.exceptionOrNull()}", silverRes.isSuccess)
+
+    val silverProfile =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeBusinessProfile().first {
+          it != null && it.planTier == com.example.data.model.SubscriptionTier.SILVER.key
+        }
+      }
+    assertEquals(300.0, silverProfile?.planAmountPaid ?: 0.0, 0.01)
+
+    val blockedMain2OnSilver =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveBusinessProfileAccount(
+          slotId = BusinessProfile.SLOT_MAIN_2,
+          ownerName = "Alice",
+          businessName = "Blocked By Silver",
+          gstin = "27AABCU9603R1ZM",
+          currencySymbol = "₹",
+          fiscalYearLabel = "FY 2026-27",
+          businessType = "Distribution",
+          monthlySalesTarget = 200000.0,
+        )
+      }
+    assertTrue(blockedMain2OnSilver.isFailure)
+
+    // Upgrade to Gold Yearly (10% discount -> ₹5,400) -> main_2 succeeds, plain_1 blocked
+    val goldYearlyRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.activateSubscriptionPlan(
+          tier = com.example.data.model.SubscriptionTier.GOLD,
+          billingCycle = com.example.data.model.SubscriptionTier.CYCLE_YEARLY,
+        )
+      }
+    assertTrue(goldYearlyRes.isSuccess)
+
+    val goldProfile =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeBusinessProfile().first {
+          it != null && it.planTier == com.example.data.model.SubscriptionTier.GOLD.key
+        }
+      }
+    assertEquals(5400.0, goldProfile?.planAmountPaid ?: 0.0, 0.01)
+
+    val allowedMain2OnGold =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveBusinessProfileAccount(
+          slotId = BusinessProfile.SLOT_MAIN_2,
+          ownerName = "Alice",
+          businessName = "Gold Branch 2",
+          gstin = "27AABCU9603R1ZM",
+          currencySymbol = "₹",
+          fiscalYearLabel = "FY 2026-27",
+          businessType = "Distribution",
+          monthlySalesTarget = 200000.0,
+        )
+      }
+    assertTrue(allowedMain2OnGold.isSuccess)
+
+    val blockedPlain1OnGold =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveBusinessProfileAccount(
+          slotId = BusinessProfile.SLOT_PLAIN_1,
+          ownerName = "Alice",
+          businessName = "Blocked Plain On Gold",
+          gstin = "",
+          currencySymbol = "₹",
+          fiscalYearLabel = "FY 2026-27",
+          businessType = "Retail & Wholesale",
+          monthlySalesTarget = 50000.0,
+        )
+      }
+    assertTrue(blockedPlain1OnGold.isFailure)
+
+    // Upgrade to Diamond Yearly (20% discount -> ₹6,720) -> plain_1 succeeds
+    val diamondYearlyRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.activateSubscriptionPlan(
+          tier = com.example.data.model.SubscriptionTier.DIAMOND,
+          billingCycle = com.example.data.model.SubscriptionTier.CYCLE_YEARLY,
+        )
+      }
+    assertTrue(diamondYearlyRes.isSuccess)
+
+    val diamondProfile =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeBusinessProfile().first {
+          it != null && it.planTier == com.example.data.model.SubscriptionTier.DIAMOND.key
+        }
+      }
+    assertEquals(6720.0, diamondProfile?.planAmountPaid ?: 0.0, 0.01)
+
+    val allowedPlain1OnDiamond =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveBusinessProfileAccount(
+          slotId = BusinessProfile.SLOT_PLAIN_1,
+          ownerName = "Alice",
+          businessName = "Diamond Plain Counter",
+          gstin = "",
+          currencySymbol = "₹",
+          fiscalYearLabel = "FY 2026-27",
+          businessType = "Retail & Wholesale",
+          monthlySalesTarget = 50000.0,
+        )
+      }
+    assertTrue(allowedPlain1OnDiamond.isSuccess)
   }
 
   private companion object {

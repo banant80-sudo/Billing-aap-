@@ -42,15 +42,15 @@ data class GstInvoice(
   val businessProfileId: String = "",
   val invoiceNumber: String = "",
   val partyId: String = "",
-  val partyName: String = "",
+  val partyName: String = "Walk-in Customer",
   val partyGstin: String = "",
   val partyAddress: String = "",
   val partyState: String = "",
   val partyPincode: String = "",
-  val invoiceType: String = TYPE_TAX_INVOICE,
-  val taxMode: String = TAX_MODE_CGST_SGST,
-  val paymentMethod: String = PAYMENT_UPI,
-  val status: String = STATUS_PAID,
+  val invoiceType: String = TYPE_TAX_INVOICE, // tax_invoice, pos_bill
+  val taxMode: String = TAX_MODE_CGST_SGST, // cgst_sgst, igst, none
+  val paymentMethod: String = PAYMENT_UPI, // cash, upi, card, credit
+  val status: String = STATUS_PAID, // paid, partial, unpaid
   val subtotal: Double = 0.0,
   val gstTotal: Double = 0.0,
   val discountAmount: Double = 0.0,
@@ -58,13 +58,51 @@ data class GstInvoice(
   val paidAmount: Double = 0.0,
   val notes: String = "",
   val lineItems: List<InvoiceLineItem> = emptyList(),
+  // GST Portal E-Invoice (IRP) fields
+  val irn: String = "",
+  val ackNo: String = "",
+  val ackDate: String = "",
+  val signedQrData: String = "",
+  val einvoiceStatus: String = "", // "", "generated", "cancelled"
+  // GST E-Way Bill & Transport details
+  val ewbNumber: String = "",
+  val ewbDate: String = "",
+  val ewbValidUntil: String = "",
+  val transportMode: String = "", // "", "road", "rail", "air", "ship"
+  val distanceKm: Int = 0,
+  val fromPlace: String = "",
+  val fromPincode: String = "",
+  val toPlace: String = "",
+  val toPincode: String = "",
+  val vehicleNumber: String = "",
+  val vehicleType: String = "", // "", "regular", "odc"
+  val transporterName: String = "",
+  val transporterId: String = "",
+  val transporterDocNo: String = "",
+  val transporterDocDate: String = "",
   @ServerTimestamp val createdAt: Timestamp? = null,
   @ServerTimestamp val updatedAt: Timestamp? = null,
 ) {
-  fun resolvedProfileId(): String = businessProfileId.ifBlank { BusinessProfile.SLOT_MAIN_1 }
+  fun resolvedProfileId(): String =
+    businessProfileId.ifBlank { BusinessProfile.SLOT_MAIN_1 }
 
   val balanceDue: Double
     get() = (grandTotal - paidAmount).coerceAtLeast(0.0)
+
+  val cgstAmount: Double
+    get() = if (taxMode == TAX_MODE_CGST_SGST) gstTotal / 2.0 else 0.0
+
+  val sgstAmount: Double
+    get() = if (taxMode == TAX_MODE_CGST_SGST) gstTotal / 2.0 else 0.0
+
+  val igstAmount: Double
+    get() = if (taxMode == TAX_MODE_IGST) gstTotal else 0.0
+
+  val hasEInvoice: Boolean
+    get() = irn.isNotBlank() && einvoiceStatus != "cancelled"
+
+  val hasEWayBill: Boolean
+    get() = ewbNumber.isNotBlank()
 
   companion object {
     const val TYPE_TAX_INVOICE = "tax_invoice"
@@ -82,5 +120,13 @@ data class GstInvoice(
     const val STATUS_PAID = "paid"
     const val STATUS_PARTIAL = "partial"
     const val STATUS_UNPAID = "unpaid"
+
+    const val TRANSPORT_ROAD = "road"
+    const val TRANSPORT_RAIL = "rail"
+    const val TRANSPORT_AIR = "air"
+    const val TRANSPORT_SHIP = "ship"
+
+    const val VEHICLE_REGULAR = "regular"
+    const val VEHICLE_ODC = "odc"
   }
 }

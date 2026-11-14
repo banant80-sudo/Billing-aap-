@@ -634,6 +634,161 @@ class ErpOperationsRuleTest : FirestoreEmulatorTestBase() {
     assertTrue(supplierAfterSecond.outstandingBalance >= 14514.0)
   }
 
+  @Test
+  fun saveInvoiceEInvoiceAndEWayBill_persistsIrnQrAndTransportDetails() = runBlocking {
+    signInTestUser(ALICE_EMAIL)
+    val repo = ErpOperationsRepository(firestore, auth)
+
+    val partyId =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo
+          .saveParty(
+            name = "Kalinga Industrial Supplies",
+            partyType = ErpParty.TYPE_CUSTOMER,
+            phone = "9437012345",
+            gstin = "21AABCK1234F1Z5",
+            openingDue = 0.0,
+            creditLimit = 500000.0,
+            notes = "B2B GST customer",
+            address = "Plot 42, Rasulgarh Industrial Estate",
+            state = "Odisha",
+            pincode = "751010",
+          )
+          .getOrThrow()
+      }
+
+    val party =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeParties().first { list -> list.any { it.id == partyId } }.first { it.id == partyId }
+      }
+
+    val invoiceId =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo
+          .createInvoice(
+            invoiceNumber = "FB-EINV-2026-01",
+            party = party,
+            walkInPartyName = "",
+            walkInPartyGstin = "",
+            invoiceType = GstInvoice.TYPE_TAX_INVOICE,
+            taxMode = GstInvoice.TAX_MODE_IGST,
+            paymentMethod = GstInvoice.PAYMENT_UPI,
+            discountAmount = 0.0,
+            paidAmount = 59000.0,
+            notes = "Inter-state B2B Machinery Dispatch",
+            lineItems =
+              listOf(
+                InvoiceLineItem(
+                  itemId = "",
+                  name = "Industrial CNC Spindle Unit",
+                  sku = "CNC-8466",
+                  hsnCode = "8466",
+                  unit = "PCS",
+                  qty = 1.0,
+                  unitPrice = 50000.0,
+                  gstRatePercent = 18.0,
+                )
+              ),
+            inventorySnapshot = emptyList(),
+          )
+          .getOrThrow()
+      }
+
+    val createdInvoice =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeInvoices().first { list -> list.any { it.id == invoiceId } }.first { it.id == invoiceId }
+      }
+
+    val sellerProfile =
+      com.example.data.model.BusinessProfile(
+        id = com.example.data.model.BusinessProfile.SLOT_MAIN_1,
+        businessName = "Alice Engineering Works",
+        gstin = "27AABCU9603R1ZM",
+        state = "Maharashtra",
+        address = "MIDC Andheri East, Mumbai",
+        pincode = "400093",
+      )
+
+    val einvResult =
+      com.example.data.reference.GstEInvoiceAndEWayBillEngine.generateEInvoice(
+        invoice = createdInvoice,
+        sellerProfile = sellerProfile,
+      )
+    assertEquals(64, einvResult.irn.length)
+
+    val saveEinvRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveInvoiceEInvoiceDetails(
+          invoice = createdInvoice,
+          result = einvResult,
+        )
+      }
+    assertTrue("saveInvoiceEInvoiceDetails failed: ${saveEinvRes.exceptionOrNull()}", saveEinvRes.isSuccess)
+
+    val invoiceWithIrn =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeInvoices().first { list ->
+          list.any { it.id == invoiceId && it.irn == einvResult.irn }
+        }.first { it.id == invoiceId }
+      }
+    assertTrue(invoiceWithIrn.hasEInvoice)
+    assertEquals(einvResult.ackNo, invoiceWithIrn.ackNo)
+
+    val transportInput =
+      com.example.data.reference.EWayBillTransportInput(
+        fromPlace = "Mumbai",
+        fromPincode = "400093",
+        toPlace = "Bhubaneswar",
+        toPincode = "751010",
+        distanceKm =
+          com.example.data.reference.GstEInvoiceAndEWayBillEngine.estimateDistanceKm(
+            fromCity = "Mumbai",
+            fromPin = "400093",
+            toCity = "Bhubaneswar",
+            toPin = "751010",
+          ),
+        transportMode = GstInvoice.TRANSPORT_ROAD,
+        vehicleNumber = "OD-02-AB-1234",
+        vehicleType = GstInvoice.VEHICLE_REGULAR,
+        transporterName = "VRL Logistics Ltd",
+        transporterId = "27AABCV1234F1Z2",
+        transporterDocNo = "LR-90812",
+        transporterDocDate = "15-11-2026",
+      )
+    val ewbResult =
+      com.example.data.reference.GstEInvoiceAndEWayBillEngine.generateEWayBill(
+        invoice = invoiceWithIrn,
+        sellerProfile = sellerProfile,
+        input = transportInput,
+      )
+    assertEquals(12, ewbResult.ewbNumber.length)
+
+    val saveEwbRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.saveInvoiceEWayBillDetails(
+          invoice = invoiceWithIrn,
+          result = ewbResult,
+        )
+      }
+    assertTrue("saveInvoiceEWayBillDetails failed: ${saveEwbRes.exceptionOrNull()}", saveEwbRes.isSuccess)
+
+    val invoiceWithEwb =
+      withTimeout(FLOW_TIMEOUT_MS) {
+        repo.observeInvoices().first { list ->
+          list.any { it.id == invoiceId && it.ewbNumber == ewbResult.ewbNumber }
+        }.first { it.id == invoiceId }
+      }
+    assertTrue(invoiceWithEwb.hasEWayBill)
+    assertEquals("OD-02-AB-1234", invoiceWithEwb.vehicleNumber)
+    assertTrue(invoiceWithEwb.distanceKm > 0)
+
+    val cancelEinvRes =
+      withTimeout(DEFAULT_TIMEOUT_MS) {
+        repo.cancelInvoiceEInvoice(invoiceWithEwb)
+      }
+    assertTrue(cancelEinvRes.isSuccess)
+  }
+
   private companion object {
     const val ALICE_EMAIL = "alice_ops@test.com"
     const val BOB_EMAIL = "bob_ops@test.com"

@@ -293,8 +293,15 @@ fun BusinessProfilesSheet(
   onCreateOrEditSlot: (slotId: String, existing: BusinessProfile?) -> Unit,
   onDeleteSlot: (String) -> Unit,
   onDismiss: () -> Unit,
+  allowedSlots: List<String> = BusinessProfile.ALL_SLOTS,
+  canManageProfiles: Boolean = true,
 ) {
   var slotPendingDelete by remember { mutableStateOf<BusinessProfile?>(null) }
+  val visibleSlots = remember(allowedSlots, canManageProfiles, profiles) {
+    val base = BusinessProfile.ALL_SLOTS.filter { it in allowedSlots }
+    if (canManageProfiles) base
+    else base.filter { slotId -> profiles.any { it.resolvedSlotId == slotId } }
+  }
 
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(
@@ -306,19 +313,24 @@ fun BusinessProfilesSheet(
     ) {
       Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-          text = "Business Profiles (${profiles.size}/3 Accounts)",
+          text =
+            if (canManageProfiles) "Business Profiles (${profiles.size}/3 Accounts)"
+            else "Allowed Business Accounts (${visibleSlots.size})",
           style = MaterialTheme.typography.headlineSmall,
           fontWeight = FontWeight.Bold,
         )
         Text(
           text =
-            "Create up to 2 Main GST accounts with full ERP modules and 1 Plain Non-GST account for simple billing.",
+            if (canManageProfiles)
+              "Create up to 2 Main GST accounts with full ERP modules and 1 Plain Non-GST account for simple billing."
+            else
+              "Switch between the business profiles assigned to your salesman account by the owner.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
 
-      BusinessProfile.ALL_SLOTS.forEach { slotId ->
+      visibleSlots.forEach { slotId ->
         val existing = profiles.firstOrNull { it.resolvedSlotId == slotId }
         val isPlain = slotId == BusinessProfile.SLOT_PLAIN_1
         val isActive = existing != null && activeSlotId == slotId
@@ -473,35 +485,37 @@ fun BusinessProfilesSheet(
                   }
                 }
 
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                  OutlinedButton(
-                    onClick = { onCreateOrEditSlot(slotId, existing) },
-                    enabled = !isBusy,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("edit_profile_$slotId"),
+                if (canManageProfiles) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                   ) {
-                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Edit")
-                  }
-                  if (slotId != BusinessProfile.SLOT_MAIN_1) {
-                    IconButton(
-                      onClick = { slotPendingDelete = existing },
+                    OutlinedButton(
+                      onClick = { onCreateOrEditSlot(slotId, existing) },
                       enabled = !isBusy,
-                      modifier = Modifier.size(48.dp).testTag("delete_profile_$slotId"),
+                      modifier = Modifier.heightIn(min = 48.dp).testTag("edit_profile_$slotId"),
                     ) {
-                      Icon(
-                        imageVector = Icons.Filled.DeleteOutline,
-                        contentDescription = "Delete $slotLabel",
-                        tint = MaterialTheme.colorScheme.error,
-                      )
+                      Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text("Edit")
+                    }
+                    if (slotId != BusinessProfile.SLOT_MAIN_1) {
+                      IconButton(
+                        onClick = { slotPendingDelete = existing },
+                        enabled = !isBusy,
+                        modifier = Modifier.size(48.dp).testTag("delete_profile_$slotId"),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Filled.DeleteOutline,
+                          contentDescription = "Delete $slotLabel",
+                          tint = MaterialTheme.colorScheme.error,
+                        )
+                      }
                     }
                   }
                 }
               }
-            } else {
+            } else if (canManageProfiles) {
               Text(
                 text =
                   if (isPlain)
