@@ -27,7 +27,7 @@ class SubscriptionCheckoutAndReceiptTest {
         merchantUpiId = "anantbharat@ybl",
         beneficiaryName = "Raghav Enterprises",
         amountInr = 6720,
-        planNote = "Finboss Diamond YEARLY",
+        planNote = "Book Diamond YEARLY",
       )
 
     assertTrue(uri.startsWith("upi://pay?"))
@@ -94,7 +94,7 @@ class SubscriptionCheckoutAndReceiptTest {
         merchantUpiId = "anantbharat@ybl",
         beneficiaryName = "Raghav Enterprises",
         amountInr = 5400,
-        planNote = "Finboss Gold YEARLY",
+        planNote = "Book Gold YEARLY",
       )
 
     val qrBitmap = SubscriptionReceiptPdfPrinter.generateQrBitmap(upiUri, sizePx = 256)

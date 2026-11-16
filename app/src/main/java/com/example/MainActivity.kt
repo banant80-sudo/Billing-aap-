@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.ai.configureAppCheck
 import com.example.auth.authStateFlow
 import com.example.auth.signOutUser
 import com.example.data.model.PhoneAccessGrant
@@ -98,6 +99,7 @@ private sealed interface SalesmanAccessResolution {
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    configureAppCheck(this, intent)
     enableEdgeToEdge()
     setContent {
       FinbossErpTheme {
@@ -410,7 +412,7 @@ private fun SalesmanAccessBlockedScreen(
             if (grant != null && !grant.isActive) {
               "Your mobile number (${grant.salesmanName}) is registered, but the Business Owner has temporarily paused your salesman access. As soon as the Owner activates your seat, this screen will unlock automatically."
             } else {
-              "Ask your Business Owner to open Finboss ERP -> Workspace -> Salesman Team & OTP Access (up to 5 seats), add your mobile number ($phoneNumber), and choose your allowed modules & profiles."
+              "Ask your Business Owner to open Book -> Workspace -> Salesman Team & OTP Access (up to 5 seats), add your mobile number ($phoneNumber), and choose your allowed modules & profiles."
             },
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -106,7 +106,7 @@ data class ErpAppSettings(
   val showGstBreakupTableOnPrint: Boolean = true,
   val showBankAndUpiOnPrint: Boolean = true,
   val showSignatureBoxOnPrint: Boolean = true,
-  val bankAndUpiDetails: String = "UPI: finboss@upi | A/C: Finboss Current A/C • IFSC: HDFC0001234",
+  val bankAndUpiDetails: String = "UPI: book@upi | A/C: Book Current A/C • IFSC: HDFC0001234",
   val invoiceFooterNote: String = "Thank you for your business!",
   val invoiceTermsText: String =
     "Goods once sold will not be taken back. Subject to local jurisdiction.",

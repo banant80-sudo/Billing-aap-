@@ -112,7 +112,7 @@ fun InventoryModuleContent(
   onDismissAddItemDialog: () -> Unit,
   onOpenAddItemDialog: () -> Unit,
   canManageStock: Boolean = true,
-  businessName: String = "Finboss Billing No.1 ERP",
+  businessName: String = "Book",
 ) {
   val context = LocalContext.current
   var searchQuery by rememberSaveable { mutableStateOf("") }

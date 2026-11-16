@@ -1850,7 +1850,7 @@ private fun buildShareableReceipt(
   currency: String,
   isPlainNonGst: Boolean = false,
 ): String = buildString {
-  appendLine(profile?.businessName ?: "Finboss Billing No.1 ERP")
+  appendLine(profile?.businessName ?: "Book")
   val sellerAddress =
     InvoicePdfPrinter.buildAddressLine(
       profile?.address.orEmpty(),

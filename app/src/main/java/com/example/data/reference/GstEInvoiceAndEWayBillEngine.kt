@@ -361,7 +361,7 @@ object GstEInvoiceAndEWayBillEngine {
       "SellerDtls",
       JSONObject().apply {
         put("Gstin", sellerGstin)
-        put("LglNm", sellerProfile?.businessName ?: "Finboss Enterprise")
+        put("LglNm", sellerProfile?.businessName ?: "Book Enterprise")
         put("Addr1", sellerProfile?.address?.ifBlank { "Main Commercial Complex" } ?: "Main Commercial Complex")
         put("Loc", sellerProfile?.state?.ifBlank { "Maharashtra" } ?: "Maharashtra")
         put("Pin", sellerProfile?.pincode?.toIntOrNull() ?: 400001)
@@ -475,7 +475,7 @@ object GstEInvoiceAndEWayBillEngine {
               put("docNo", invoice.invoiceNumber)
               put("docDate", docDateStr)
               put("fromGstin", sellerGstin)
-              put("fromTrdName", sellerProfile?.businessName ?: "Finboss Enterprise")
+              put("fromTrdName", sellerProfile?.businessName ?: "Book Enterprise")
               put("fromPlace", input.fromPlace)
               put("fromPincode", input.fromPincode.toIntOrNull() ?: 400001)
               put("toGstin", buyerGstin)

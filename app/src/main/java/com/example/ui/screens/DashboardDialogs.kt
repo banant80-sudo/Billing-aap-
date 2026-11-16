@@ -825,7 +825,7 @@ fun ModuleDetailSheet(
                 style = MaterialTheme.typography.titleSmall,
               )
               Text(
-                text = "Mark this module as queued next in your Finboss ERP build plan",
+                text = "Mark this module as queued next in your Book build plan",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )

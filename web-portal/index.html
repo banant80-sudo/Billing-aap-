@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Finboss Billing No.1 ERP — Desktop Web Portal</title>
+  <title>Book — Desktop Web Portal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
@@ -14,9 +14,9 @@
   <div id="auth-screen" class="auth-shell">
     <div class="auth-card">
       <div class="brand-badge">MODULAR CLOUD ERP • DESKTOP WEB</div>
-      <h1>Finboss Billing No.1 ERP</h1>
+      <h1>Book</h1>
       <p class="muted">
-        Full-screen Desktop Web Portal synced live with your Finboss Android ERP Cloud Database (GST Billing, E-Invoice, E-Way Bill, Inventory, Khata &amp; Reports).
+        Full-screen Desktop Web Portal synced live with your Book Android Cloud Database (GST Billing, E-Invoice, E-Way Bill, Inventory, Ledger &amp; Reports).
       </p>
       <div class="auth-features">
         <div class="auth-feature-item">Real-Time Cloud Firestore Sync with Mobile App</div>
@@ -37,10 +37,10 @@
   <div id="app-shell" class="app-shell hidden">
     <aside class="sidebar no-print">
       <div class="sidebar-brand">
-        <div class="brand-logo">FB</div>
+        <div class="brand-logo">B</div>
         <div>
-          <div class="brand-title">Finboss ERP</div>
-          <div class="brand-sub">Billing No.1 • Web</div>
+          <div class="brand-title">Book</div>
+          <div class="brand-sub">Billing &amp; Ledger • Web</div>
         </div>
       </div>
 
@@ -54,7 +54,7 @@
         <button class="nav-item active" data-tab="overview">Overview KPIs</button>
         <button class="nav-item" data-tab="billing">Billing &amp; GST Invoices</button>
         <button class="nav-item" data-tab="stock">Inventory &amp; Stock</button>
-        <button class="nav-item" data-tab="parties">Parties &amp; Khata</button>
+        <button class="nav-item" data-tab="parties">Parties &amp; Ledger</button>
         <button class="nav-item" data-tab="expenses">Expenses &amp; Cashbook</button>
         <button class="nav-item" data-tab="reports">GST &amp; P&amp;L Reports</button>
       </nav>
@@ -200,13 +200,43 @@
         </div>
       </section>
 
-      <!-- TAB: PARTIES -->
+      <!-- TAB: PARTIES & LEDGER -->
       <section id="tab-parties" class="tab-panel">
-        <div class="toolbar">
-          <input id="party-search" class="input-text search-input" type="search" placeholder="Search party name, phone, GSTIN..." />
-          <button id="parties-add-btn" class="btn btn-primary">+ Add Customer / Supplier</button>
-        </div>
         <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Ledger Analytics — Party, Item &amp; Stock P&amp;L</h3>
+              <div id="ledger-range-label" class="muted"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="ledger-print-btn" class="btn btn-secondary btn-sm">Print / Download PDF</button>
+              <button id="ledger-wa-btn" class="btn btn-ghost btn-sm">WhatsApp Summary</button>
+            </div>
+          </div>
+          <div class="period-bar" id="ledger-period-bar">
+            <button class="chip-btn active" data-ledger-period="month">This Month</button>
+            <button class="chip-btn" data-ledger-period="quarter">Quarter</button>
+            <button class="chip-btn" data-ledger-period="half_year">Half Year</button>
+            <button class="chip-btn" data-ledger-period="prev_year">Previous Year</button>
+            <button class="chip-btn" data-ledger-period="present_year">Present Year</button>
+            <button class="chip-btn" data-ledger-period="all">All Time</button>
+          </div>
+          <div id="ledger-kpi-strip" class="report-summary-grid"></div>
+        </div>
+
+        <div class="toolbar">
+          <div class="period-bar" id="ledger-view-bar">
+            <button class="chip-btn active" data-ledger-view="parties">Party Profit</button>
+            <button class="chip-btn" data-ledger-view="items">Item &amp; Stock Profit</button>
+            <button class="chip-btn" data-ledger-view="transactions">Transactions</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;">
+            <input id="party-search" class="input-text search-input" type="search" placeholder="Search party, item, SKU, ref #..." />
+            <button id="parties-add-btn" class="btn btn-primary">+ Add Customer / Supplier</button>
+          </div>
+        </div>
+
+        <div id="ledger-parties-wrap" class="card">
           <div class="table-wrap">
             <table>
               <thead>
@@ -214,12 +244,49 @@
                   <th>Party Name</th>
                   <th>Type</th>
                   <th>Phone / GSTIN</th>
-                  <th>State</th>
+                  <th class="right">Period Sales</th>
+                  <th class="right">Profit / Loss (%)</th>
                   <th class="right">Net Due</th>
                   <th class="right">Actions</th>
                 </tr>
               </thead>
               <tbody id="parties-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="ledger-items-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item / SKU</th>
+                  <th class="right">Stock Qty</th>
+                  <th class="right">Stock Value</th>
+                  <th class="right">Sold Qty</th>
+                  <th class="right">Sales</th>
+                  <th class="right">Cost</th>
+                  <th class="right">Profit / Loss (%)</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-items-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="ledger-tx-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type / Ref #</th>
+                  <th>Party &amp; Items</th>
+                  <th class="right">Amount</th>
+                  <th class="right">Profit / Loss (%)</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tx-table"></tbody>
             </table>
           </div>
         </div>
@@ -253,6 +320,26 @@
 
       <!-- TAB: REPORTS -->
       <section id="tab-reports" class="tab-panel">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Report Period Filter</h3>
+              <div id="reports-range-label" class="muted"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="reports-print-btn" class="btn btn-secondary btn-sm">Print / Download PDF</button>
+              <button id="reports-whatsapp-btn" class="btn btn-sm btn-primary">Share Report on WhatsApp</button>
+            </div>
+          </div>
+          <div class="period-bar" id="reports-period-bar">
+            <button class="chip-btn active" data-report-period="month">This Month</button>
+            <button class="chip-btn" data-report-period="quarter">Quarter</button>
+            <button class="chip-btn" data-report-period="half_year">Half Year</button>
+            <button class="chip-btn" data-report-period="prev_year">Previous Year</button>
+            <button class="chip-btn" data-report-period="present_year">Present Year</button>
+            <button class="chip-btn" data-report-period="all">All Time</button>
+          </div>
+        </div>
         <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-label">Taxable Sales (GSTR-1)</div>
@@ -274,7 +361,6 @@
         <div class="card">
           <div class="card-header">
             <h3>Business Profit &amp; Loss Snapshot</h3>
-            <button id="reports-whatsapp-btn" class="btn btn-sm btn-primary">Share Report on WhatsApp</button>
           </div>
           <div id="rep-pl-summary" class="report-summary-grid"></div>
         </div>

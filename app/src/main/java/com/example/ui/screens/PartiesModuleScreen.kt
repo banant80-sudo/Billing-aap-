@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,11 +65,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.BusinessProfile
+import com.example.data.model.DashboardEntry
+import com.example.data.model.ErpExpense
 import com.example.data.model.ErpParty
+import com.example.data.model.GstInvoice
+import com.example.data.model.InventoryItem
 import com.example.data.reference.IndiaStates
 import com.example.ui.theme.MonoMetricMedium
 import com.example.ui.viewmodel.UiState
+import com.example.util.LedgerAnalyticsEngine
+import com.example.util.LedgerPeriod
+import com.example.util.LedgerReportPdfPrinter
+import com.example.util.PartyProfitSummary
 import com.example.util.WhatsAppShareHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PartiesModuleContent(
@@ -94,15 +109,74 @@ fun PartiesModuleContent(
   onDismissAddPartyDialog: () -> Unit,
   onOpenAddPartyDialog: () -> Unit,
   canManageParties: Boolean = true,
-  businessName: String = "Finboss Billing No.1 ERP",
+  businessName: String = "Book",
+  invoices: List<GstInvoice> = emptyList(),
+  inventory: List<InventoryItem> = emptyList(),
+  expenses: List<ErpExpense> = emptyList(),
+  entries: List<DashboardEntry> = emptyList(),
+  profile: BusinessProfile? = null,
+  isPlainNonGst: Boolean = false,
 ) {
   val context = LocalContext.current
+  val coroutineScope = rememberCoroutineScope()
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var typeFilter by rememberSaveable { mutableStateOf("all") }
+  var selectedPeriod by rememberSaveable { mutableStateOf(LedgerPeriod.THIS_MONTH) }
+  var ledgerViewMode by rememberSaveable { mutableStateOf("parties") } // "parties", "items", "transactions"
   var editingParty by remember { mutableStateOf<ErpParty?>(null) }
   var paymentParty by remember { mutableStateOf<ErpParty?>(null) }
 
   val parties = (partiesState as? UiState.Success)?.data.orEmpty()
+  val ledgerReport =
+    remember(selectedPeriod, parties, inventory, invoices, expenses, entries, isPlainNonGst) {
+      LedgerAnalyticsEngine.buildReport(
+        period = selectedPeriod,
+        parties = parties,
+        inventory = inventory,
+        invoices = invoices,
+        expenses = expenses,
+        entries = entries,
+        isPlainNonGst = isPlainNonGst,
+      )
+    }
+
+  val partyProfitById =
+    remember(ledgerReport.partySummaries) {
+      ledgerReport.partySummaries.associateBy { it.partyId }
+    }
+
+  val downloadLedgerLauncher =
+    rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { targetUri ->
+      if (targetUri == null) return@rememberLauncherForActivityResult
+      coroutineScope.launch {
+        val result =
+          withContext(Dispatchers.IO) {
+            runCatching {
+              context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                LedgerReportPdfPrinter.writeLedgerPdfToStream(
+                  report = ledgerReport,
+                  profile = profile,
+                  currency = currency,
+                  isPlainNonGst = isPlainNonGst,
+                  outputStream = out,
+                )
+              } ?: error("Unable to open PDF output destination")
+            }
+          }
+        if (result.isSuccess) {
+          Toast.makeText(context, "Ledger PDF downloaded", Toast.LENGTH_SHORT).show()
+        } else {
+          Toast.makeText(
+            context,
+            result.exceptionOrNull()?.localizedMessage ?: "Failed to download Ledger PDF",
+            Toast.LENGTH_SHORT,
+          ).show()
+        }
+      }
+    }
+
   val totalToCollect =
     remember(parties) {
       parties.filter { it.partyType == ErpParty.TYPE_CUSTOMER }.sumOf { it.outstandingBalance }
@@ -126,11 +200,72 @@ fun PartiesModuleContent(
       }
     }
 
+  val filteredItems =
+    remember(ledgerReport.itemSummaries, searchQuery) {
+      val q = searchQuery.trim().lowercase()
+      if (q.isEmpty()) ledgerReport.itemSummaries
+      else ledgerReport.itemSummaries.filter {
+        it.itemName.lowercase().contains(q) ||
+          it.sku.lowercase().contains(q) ||
+          it.hsnCode.lowercase().contains(q)
+      }
+    }
+
+  val filteredTransactions =
+    remember(ledgerReport.transactions, searchQuery) {
+      val q = searchQuery.trim().lowercase()
+      if (q.isEmpty()) ledgerReport.transactions
+      else ledgerReport.transactions.filter {
+        it.partyName.lowercase().contains(q) ||
+          it.itemsSummary.lowercase().contains(q) ||
+          it.voucherNumber.lowercase().contains(q) ||
+          it.voucherType.lowercase().contains(q)
+      }
+    }
+
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
+    item {
+      LedgerPeriodAndExportCard(
+        selectedPeriod = selectedPeriod,
+        report = ledgerReport,
+        currency = currency,
+        onSelectPeriod = { selectedPeriod = it },
+        onPrintPdf = {
+          runCatching {
+            LedgerReportPdfPrinter.printLedgerReport(
+              context = context,
+              report = ledgerReport,
+              profile = profile,
+              currency = currency,
+              isPlainNonGst = isPlainNonGst,
+            )
+          }.onFailure { err ->
+            Toast.makeText(context, err.localizedMessage ?: "Print failed", Toast.LENGTH_SHORT).show()
+          }
+        },
+        onDownloadPdf = {
+          downloadLedgerLauncher.launch(LedgerReportPdfPrinter.buildPdfFileName(selectedPeriod))
+        },
+        onShareWhatsApp = {
+          val msg =
+            LedgerReportPdfPrinter.formatLedgerWhatsAppSummary(
+              report = ledgerReport,
+              businessName = businessName,
+              currency = currency,
+            )
+          WhatsAppShareHelper.shareTextToWhatsApp(
+            context = context,
+            text = msg,
+            chooserTitle = "Share Ledger Summary on WhatsApp",
+          )
+        },
+      )
+    }
+
     item {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -152,90 +287,154 @@ fun PartiesModuleContent(
     }
 
     item {
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val viewTabs =
+          listOf(
+            "parties" to "Party Profit (${parties.size})",
+            "items" to "Item & Stock (${ledgerReport.itemSummaries.size})",
+            "transactions" to "Transactions (${ledgerReport.transactions.size})",
+          )
+        items(viewTabs) { (key, label) ->
+          FilterChip(
+            selected = ledgerViewMode == key,
+            onClick = { ledgerViewMode = key },
+            label = { Text(label) },
+            modifier = Modifier.testTag("ledger_view_tab_$key"),
+          )
+        }
+      }
+    }
+
+    item {
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-        placeholder = { Text("Search parties by name, phone, or GSTIN") },
+        placeholder = {
+          Text(
+            when (ledgerViewMode) {
+              "items" -> "Search items, SKU, or HSN code"
+              "transactions" -> "Search transactions, ref #, party, or item"
+              else -> "Search parties by name, phone, or GSTIN"
+            }
+          )
+        },
         singleLine = true,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth().testTag("parties_search_input"),
       )
     }
 
-    item {
-      LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val filters =
-          listOf(
-            "all" to "All (${parties.size})",
-            ErpParty.TYPE_CUSTOMER to "Customers",
-            ErpParty.TYPE_SUPPLIER to "Suppliers",
-          )
-        items(filters) { (key, label) ->
-          FilterChip(
-            selected = typeFilter == key,
-            onClick = { typeFilter = key },
-            label = { Text(label) },
-          )
+    if (ledgerViewMode == "parties") {
+      item {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          val filters =
+            listOf(
+              "all" to "All (${parties.size})",
+              ErpParty.TYPE_CUSTOMER to "Customers",
+              ErpParty.TYPE_SUPPLIER to "Suppliers",
+            )
+          items(filters) { (key, label) ->
+            FilterChip(
+              selected = typeFilter == key,
+              onClick = { typeFilter = key },
+              label = { Text(label) },
+            )
+          }
         }
       }
     }
 
-    when (partiesState) {
-      is UiState.Loading -> {
-        item {
-          Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-          }
-        }
-      }
-      is UiState.Error -> {
-        item {
-          Text(
-            text = partiesState.message,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium,
-          )
-        }
-      }
-      is UiState.Success -> {
-        if (filteredParties.isEmpty()) {
+    when (ledgerViewMode) {
+      "items" -> {
+        if (filteredItems.isEmpty()) {
           item {
             ModuleEmptyCard(
               icon = Icons.Filled.Groups,
-              title = if (parties.isEmpty()) "No Parties in Khata Yet" else "No Matching Parties",
-              subtitle =
-                if (parties.isEmpty())
-                  "Add customers and suppliers to track GSTIN, credit limits, and running Khata dues."
-                else "Try adjusting your search or filter.",
-              actionLabel = if (canManageParties) "Add Party" else null,
-              onAction = if (canManageParties) onOpenAddPartyDialog else null,
+              title = "No Item / Stock Activity",
+              subtitle = "Add stock SKUs or create invoices in ${selectedPeriod.label} to view item-wise profit & loss %.",
             )
           }
         } else {
-          items(filteredParties, key = { it.id }) { party ->
-            PartyLedgerCard(
-              party = party,
-              currency = currency,
-              canManageParties = canManageParties,
-              onShareWhatsApp = {
-                val msg =
-                  WhatsAppShareHelper.formatPartyStatementSummary(
-                    party = party,
-                    businessName = businessName,
-                    currency = currency,
-                  )
-                WhatsAppShareHelper.shareTextToWhatsApp(
-                  context = context,
-                  text = msg,
-                  rawPhoneNumber = party.phone,
-                  chooserTitle = "Share Khata Statement on WhatsApp",
-                )
-              },
-              onRecordPayment = { paymentParty = party },
-              onEdit = { editingParty = party },
-              onDelete = { onDeleteParty(party.id) },
+          items(filteredItems, key = { it.itemId }) { itemSummary ->
+            ItemStockProfitCard(item = itemSummary, currency = currency)
+          }
+        }
+      }
+      "transactions" -> {
+        if (filteredTransactions.isEmpty()) {
+          item {
+            ModuleEmptyCard(
+              icon = Icons.Filled.Groups,
+              title = "No Transactions in ${selectedPeriod.label}",
+              subtitle = "Switch period filter (Quarter, Half Year, Previous Year, Present Year) or create a bill.",
             )
+          }
+        } else {
+          items(filteredTransactions, key = { it.id }) { tx ->
+            LedgerTransactionCard(tx = tx, currency = currency)
+          }
+        }
+      }
+      else -> {
+        when (partiesState) {
+          is UiState.Loading -> {
+            item {
+              Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+              }
+            }
+          }
+          is UiState.Error -> {
+            item {
+              Text(
+                text = partiesState.message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+              )
+            }
+          }
+          is UiState.Success -> {
+            if (filteredParties.isEmpty()) {
+              item {
+                ModuleEmptyCard(
+                  icon = Icons.Filled.Groups,
+                  title = if (parties.isEmpty()) "No Parties in Ledger Yet" else "No Matching Parties",
+                  subtitle =
+                    if (parties.isEmpty())
+                      "Add customers and suppliers to track GSTIN, credit limits, and party profit/loss %."
+                    else "Try adjusting your search or filter.",
+                  actionLabel = if (canManageParties) "Add Party" else null,
+                  onAction = if (canManageParties) onOpenAddPartyDialog else null,
+                )
+              }
+            } else {
+              items(filteredParties, key = { it.id }) { party ->
+                PartyLedgerCard(
+                  party = party,
+                  profitSummary = partyProfitById[party.id],
+                  currency = currency,
+                  canManageParties = canManageParties,
+                  onShareWhatsApp = {
+                    val msg =
+                      WhatsAppShareHelper.formatPartyStatementSummary(
+                        party = party,
+                        businessName = businessName,
+                        currency = currency,
+                      )
+                    WhatsAppShareHelper.shareTextToWhatsApp(
+                      context = context,
+                      text = msg,
+                      rawPhoneNumber = party.phone,
+                      chooserTitle = "Share Ledger Statement on WhatsApp",
+                    )
+                  },
+                  onRecordPayment = { paymentParty = party },
+                  onEdit = { editingParty = party },
+                  onDelete = { onDeleteParty(party.id) },
+                )
+              }
+            }
           }
         }
       }
@@ -290,6 +489,7 @@ fun PartiesModuleContent(
 @Composable
 private fun PartyLedgerCard(
   party: ErpParty,
+  profitSummary: PartyProfitSummary? = null,
   currency: String,
   canManageParties: Boolean = true,
   onShareWhatsApp: () -> Unit,
@@ -381,6 +581,27 @@ private fun PartyLedgerCard(
             text = if (balance > 0.0) (if (isCustomer) "To Collect" else "To Pay") else "Settled",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+
+      if (profitSummary != null && profitSummary.hasSalesActivity) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = "Period Sales: ${formatErpMoney(currency, profitSummary.salesNetRevenue)} (${profitSummary.transactionCount} bills)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          ProfitLossPercentBadge(
+            profitAmount = profitSummary.profitAmount,
+            profitPercent = profitSummary.profitPercent,
+            currency = currency,
+            showAmount = true,
+            modifier = Modifier.testTag("party_profit_badge_${party.id}"),
           )
         }
       }

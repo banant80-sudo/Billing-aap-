@@ -230,7 +230,7 @@ object FinbossBackupSerializer {
 
   fun encodeToJson(payload: FinbossBackupPayload): String {
     val root = JSONObject()
-    root.put("app", "Finboss Billing No.1 ERP")
+    root.put("app", "Book")
     root.put("schemaVersion", payload.schemaVersion)
     root.put("exportedAtMs", payload.exportedAtMs)
 
@@ -450,7 +450,7 @@ object FinbossBackupSerializer {
           BusinessProfile(
             id = slotId,
             ownerName = p.optString("ownerName", "Business Owner"),
-            businessName = p.optString("businessName", "Finboss Enterprise"),
+            businessName = p.optString("businessName", "Book Enterprise"),
             gstin = p.optString("gstin", ""),
             address = p.optString("address", ""),
             state = p.optString("state", ""),
@@ -477,7 +477,7 @@ object FinbossBackupSerializer {
           BusinessProfile(
             id = slotId,
             ownerName = p.optString("ownerName", "Business Owner"),
-            businessName = p.optString("businessName", "Finboss Enterprise"),
+            businessName = p.optString("businessName", "Book Enterprise"),
             gstin = if (slotId == BusinessProfile.SLOT_PLAIN_1) "" else p.optString("gstin", ""),
             address = p.optString("address", ""),
             state = p.optString("state", ""),

@@ -48,6 +48,8 @@ const state = {
   inventory: [],
   parties: [],
   expenses: [],
+  ledgerPeriod: "month",
+  ledgerView: "parties",
   unsubs: []
 };
 
@@ -105,7 +107,7 @@ function activeProfile() {
     state.profiles[0] ||
     state.rootProfile || {
       id: "main_1",
-      businessName: "Finboss Enterprise",
+      businessName: "Book Enterprise",
       profileMode: "main_gst",
       monthlySalesTarget: 250000
     }
@@ -154,7 +156,7 @@ async function ensureBootstrapWorkspace(user) {
       userId: user.uid,
       ownerName: (user.displayName || "Business Owner").slice(0, 80),
       ownerEmail: (user.email || ADMIN_RECEIPT_EMAIL).slice(0, 150),
-      businessName: `${(user.displayName || "Finboss").split(" ")[0]} Enterprises`.slice(0, 100),
+      businessName: `${(user.displayName || "Book").split(" ")[0]} Enterprises`.slice(0, 100),
       gstin: "",
       address: "",
       state: "Maharashtra",
@@ -378,29 +380,248 @@ function renderStock() {
     : `<tr><td colspan="6" class="muted">No inventory items yet.</td></tr>`;
 }
 
-function renderParties() {
-  const q = ($("party-search").value || "").trim().toLowerCase();
-  const list = profileScoped(state.parties).filter((p) => {
-    if (!q) return true;
-    return [p.name, p.phone, p.gstin].some((v) => String(v || "").toLowerCase().includes(q));
+function toMs(ts) {
+  if (!ts) return Date.now();
+  if (typeof ts.toDate === "function") return ts.toDate().getTime();
+  if (typeof ts.seconds === "number") return ts.seconds * 1000;
+  return Number(ts) || Date.now();
+}
+
+function resolveLedgerRange(period) {
+  if (period === "all") return { startMs: 0, endMs: Number.MAX_SAFE_INTEGER, label: "All Transactions" };
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0..11
+  const fyStart = m >= 3 ? y : y - 1;
+  const fmt = (d) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const sod = (yr, mo, dy) => new Date(yr, mo, dy, 0, 0, 0, 0).getTime();
+  const eom = (yr, mo) => new Date(yr, mo + 1, 0, 23, 59, 59, 999).getTime();
+
+  if (period === "month") {
+    const start = sod(y, m, 1);
+    const end = eom(y, m);
+    return { startMs: start, endMs: end, label: new Date(start).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) };
+  }
+  if (period === "quarter") {
+    let q = "Q4", sy = y, sm = 0, em = 2;
+    if (m >= 3 && m <= 5) { q = "Q1"; sm = 3; em = 5; }
+    else if (m >= 6 && m <= 8) { q = "Q2"; sm = 6; em = 8; }
+    else if (m >= 9 && m <= 11) { q = "Q3"; sm = 9; em = 11; }
+    const start = sod(sy, sm, 1), end = eom(sy, em);
+    return { startMs: start, endMs: end, label: `${q} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
+  }
+  if (period === "half_year") {
+    const isH1 = m >= 3 && m <= 8;
+    const start = isH1 ? sod(y, 3, 1) : sod(fyStart, 9, 1);
+    const end = isH1 ? eom(y, 8) : eom(fyStart + 1, 2);
+    return { startMs: start, endMs: end, label: `${isH1 ? "H1" : "H2"} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
+  }
+  if (period === "prev_year") {
+    const py = fyStart - 1;
+    const start = sod(py, 3, 1), end = eom(py + 1, 2);
+    return { startMs: start, endMs: end, label: `FY ${py}-${String((py + 1) % 100).padStart(2, "0")} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
+  }
+  // present_year
+  const start = sod(fyStart, 3, 1), end = eom(fyStart + 1, 2);
+  return { startMs: start, endMs: end, label: `FY ${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
+}
+
+function fmtPct(pct) {
+  const n = Number(pct || 0);
+  const sign = n > 0.05 ? "+" : n < -0.05 ? "-" : "";
+  return `${sign}${Math.abs(n).toFixed(1)}%`;
+}
+
+function computeProfitPct(profit, cost, rev) {
+  if (cost > 0.0001) return (profit / cost) * 100;
+  if (rev > 0.0001) return (profit / rev) * 100;
+  return 0;
+}
+
+function computeLedgerAnalytics(period) {
+  const range = resolveLedgerRange(period);
+  const inRange = (ts) => ts >= range.startMs && ts <= range.endMs;
+
+  const invList = profileScoped(state.invoices).filter((i) => inRange(toMs(i.createdAt)));
+  const expList = profileScoped(state.expenses).filter((e) => inRange(toMs(e.createdAt)));
+  const stockList = profileScoped(state.inventory);
+  const partyList = profileScoped(state.parties);
+
+  const byId = new Map(stockList.map((s) => [s.id, s]));
+  const bySku = new Map(stockList.filter((s) => s.sku).map((s) => [String(s.sku).toLowerCase(), s]));
+  const byName = new Map(stockList.filter((s) => s.name).map((s) => [String(s.name).trim().toLowerCase(), s]));
+  const findStock = (l) => (l.itemId && byId.get(l.itemId)) || (l.sku && bySku.get(String(l.sku).toLowerCase())) || byName.get(String(l.name || "").trim().toLowerCase());
+
+  const itemAcc = new Map();
+  stockList.forEach((s) => itemAcc.set(s.id, { item: s, name: s.name, sku: s.sku, unit: s.unit || "PCS", stockQty: Number(s.stockQty || 0), stockVal: Number(s.stockQty || 0) * Number(s.purchasePrice || 0), soldQty: 0, sales: 0, cost: 0 }));
+
+  const partyAcc = new Map();
+  partyList.forEach((p) => partyAcc.set(p.id, { party: p, name: p.name, type: p.partyType || "customer", phone: p.phone || "", gstin: p.gstin || "", due: Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0)), txCount: 0, sales: 0, cost: 0 }));
+
+  const partyByName = new Map(partyList.map((p) => [String(p.name || "").trim().toLowerCase(), p]));
+  const txRows = [];
+  let totalSales = 0, totalCost = 0;
+
+  invList.forEach((inv) => {
+    const rawSub = Number(inv.subtotal || 0) || (inv.lineItems || []).reduce((s, l) => s + Number(l.taxableAmount || l.qty * l.unitPrice || 0), 0);
+    const netRev = Math.max(0, rawSub - Number(inv.discountAmount || 0));
+    const factor = rawSub > 0.0001 ? netRev / rawSub : 1;
+    let invCost = 0;
+    (inv.lineItems || []).forEach((l) => {
+      const st = findStock(l);
+      const unitCost = Number(st?.purchasePrice || 0);
+      const lRev = Number(l.taxableAmount || l.qty * l.unitPrice || 0) * factor;
+      const lCost = Number(l.qty || 0) * unitCost;
+      invCost += lCost;
+      const k = st ? st.id : `name:${String(l.name || "").trim().toLowerCase()}`;
+      if (!itemAcc.has(k)) itemAcc.set(k, { item: st, name: l.name, sku: l.sku || "", unit: l.unit || "PCS", stockQty: 0, stockVal: 0, soldQty: 0, sales: 0, cost: 0 });
+      const ia = itemAcc.get(k);
+      ia.soldQty += Number(l.qty || 0);
+      ia.sales += lRev;
+      ia.cost += lCost;
+    });
+    const invProfit = netRev - invCost;
+    const invPct = computeProfitPct(invProfit, invCost, netRev);
+    totalSales += netRev;
+    totalCost += invCost;
+
+    const matchedP = (inv.partyId && partyAcc.get(inv.partyId)?.party) || partyByName.get(String(inv.partyName || "").trim().toLowerCase());
+    const pk = matchedP ? matchedP.id : `walkin:${String(inv.partyName || "").trim().toLowerCase()}`;
+    if (!partyAcc.has(pk)) partyAcc.set(pk, { party: matchedP, name: inv.partyName || "Walk-in", type: "customer", phone: "", gstin: inv.partyGstin || "", due: Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0)), txCount: 0, sales: 0, cost: 0 });
+    const pa = partyAcc.get(pk);
+    pa.txCount += 1;
+    pa.sales += netRev;
+    pa.cost += invCost;
+
+    txRows.push({
+      ts: toMs(inv.createdAt),
+      type: isPlainNonGst() ? "BILL" : "SALE",
+      ref: inv.invoiceNumber,
+      party: inv.partyName,
+      items: (inv.lineItems || []).map((l) => `${l.name} (${l.qty})`).join(", "),
+      amount: Number(inv.grandTotal || 0),
+      profit: invProfit,
+      pct: invPct
+    });
   });
 
-  $("parties-table").innerHTML = list.length
-    ? list
+  let totalExpenses = 0;
+  expList.forEach((e) => {
+    totalExpenses += Number(e.amount || 0);
+    txRows.push({
+      ts: toMs(e.createdAt),
+      type: e.category === "purchases" ? "PURCHASE" : "EXPENSE",
+      ref: e.referenceNo || e.category || "EXP",
+      party: e.partyName || e.title,
+      items: e.title,
+      amount: Number(e.amount || 0),
+      profit: null,
+      pct: null
+    });
+  });
+
+  const netProfit = totalCost > 0 ? totalSales - totalCost : totalSales - totalExpenses;
+  const netPct = computeProfitPct(netProfit, totalCost > 0 ? totalCost : totalExpenses, totalSales);
+  const stockValue = stockList.reduce((s, it) => s + Number(it.stockQty || 0) * Number(it.purchasePrice || 0), 0);
+
+  return {
+    period,
+    rangeLabel: range.label,
+    totalSales,
+    totalCost,
+    totalExpenses,
+    netProfit,
+    netPct,
+    stockValue,
+    invoices: invList,
+    expenses: expList,
+    parties: Array.from(partyAcc.values()).map((p) => {
+      const profit = p.sales - p.cost;
+      return { ...p, profit, pct: computeProfitPct(profit, p.cost, p.sales), hasSales: p.sales > 0 || p.cost > 0 };
+    }),
+    items: Array.from(itemAcc.values()).map((it) => {
+      const profit = it.sales - it.cost;
+      return { ...it, profit, pct: it.soldQty > 0 ? computeProfitPct(profit, it.cost, it.sales) : 0, hasSold: it.soldQty > 0 };
+    }),
+    transactions: txRows.sort((a, b) => b.ts - a.ts)
+  };
+}
+
+function renderParties() {
+  const q = ($("party-search").value || "").trim().toLowerCase();
+  const analytics = computeLedgerAnalytics(state.ledgerPeriod);
+  $("ledger-range-label").textContent = analytics.rangeLabel;
+  const plBadge = `<span class="pill ${analytics.netProfit >= 0 ? "pill-profit" : "pill-loss"}">${analytics.netProfit >= 0 ? "Profit" : "Loss"} ${fmtPct(analytics.netPct)}</span>`;
+  $("ledger-kpi-strip").innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Period Sales</div><div class="kpi-value mono">${inr(analytics.totalSales)}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Net Profit / Loss</div><div class="kpi-value mono ${analytics.netProfit >= 0 ? "text-profit" : "text-loss"}">${inr(analytics.netProfit)}</div><div>${plBadge}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Stock Valuation</div><div class="kpi-value mono">${inr(analytics.stockValue)}</div></div>
+  `;
+
+  $("ledger-parties-wrap").classList.toggle("hidden", state.ledgerView !== "parties");
+  $("ledger-items-wrap").classList.toggle("hidden", state.ledgerView !== "items");
+  $("ledger-tx-wrap").classList.toggle("hidden", state.ledgerView !== "transactions");
+
+  const partyRows = analytics.parties.filter((p) => !q || [p.name, p.phone, p.gstin].some((v) => String(v || "").toLowerCase().includes(q)));
+  $("parties-table").innerHTML = partyRows.length
+    ? partyRows
         .map((p) => {
-          const due = Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0));
+          const plCell = p.hasSales
+            ? `<span class="pill ${p.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(p.profit)} (${fmtPct(p.pct)})</span>`
+            : `<span class="muted">—</span>`;
           return `
         <tr>
           <td class="bold">${escapeHtml(p.name)}</td>
-          <td>${escapeHtml((p.partyType || "customer").toUpperCase())}</td>
+          <td>${escapeHtml(String(p.type || "customer").toUpperCase())}</td>
           <td class="mono">${escapeHtml(p.phone || "—")}<br/><span class="muted">${escapeHtml(p.gstin || "")}</span></td>
-          <td>${escapeHtml(p.state || "—")}</td>
-          <td class="right mono bold">${inr(due)}</td>
-          <td class="right"><button class="btn btn-sm btn-ghost" data-action="wa-party" data-id="${escapeHtml(p.id)}">WhatsApp</button></td>
+          <td class="right mono">${inr(p.sales)}</td>
+          <td class="right">${plCell}</td>
+          <td class="right mono bold">${inr(p.due)}</td>
+          <td class="right">${p.party ? `<button class="btn btn-sm btn-ghost" data-action="wa-party" data-id="${escapeHtml(p.party.id)}">WhatsApp</button>` : ""}</td>
         </tr>`;
         })
         .join("")
-    : `<tr><td colspan="6" class="muted">No parties yet.</td></tr>`;
+    : `<tr><td colspan="7" class="muted">No parties yet.</td></tr>`;
+
+  const itemRows = analytics.items.filter((it) => !q || [it.name, it.sku].some((v) => String(v || "").toLowerCase().includes(q)));
+  $("ledger-items-table").innerHTML = itemRows.length
+    ? itemRows
+        .map((it) => {
+          const plCell = it.hasSold
+            ? `<span class="pill ${it.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(it.profit)} (${fmtPct(it.pct)})</span>`
+            : `<span class="muted">No Sales</span>`;
+          return `
+        <tr>
+          <td class="bold">${escapeHtml(it.name)}<br/><span class="muted mono">${escapeHtml(it.sku || "")}</span></td>
+          <td class="right mono">${it.stockQty} ${escapeHtml(it.unit)}</td>
+          <td class="right mono">${inr(it.stockVal)}</td>
+          <td class="right mono">${it.soldQty}</td>
+          <td class="right mono">${inr(it.sales)}</td>
+          <td class="right mono">${inr(it.cost)}</td>
+          <td class="right">${plCell}</td>
+        </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="7" class="muted">No items yet.</td></tr>`;
+
+  const txFiltered = analytics.transactions.filter((t) => !q || [t.party, t.items, t.ref, t.type].some((v) => String(v || "").toLowerCase().includes(q)));
+  $("ledger-tx-table").innerHTML = txFiltered.length
+    ? txFiltered
+        .map((t) => {
+          const plCell = t.profit !== null
+            ? `<span class="pill ${t.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(t.profit)} (${fmtPct(t.pct)})</span>`
+            : `<span class="muted">—</span>`;
+          return `
+        <tr>
+          <td class="mono">${new Date(t.ts).toLocaleDateString("en-IN")}</td>
+          <td><span class="pill pill-info">${escapeHtml(t.type)}</span> <span class="mono bold">${escapeHtml(t.ref)}</span></td>
+          <td><strong>${escapeHtml(t.party)}</strong> — ${escapeHtml(t.items)}</td>
+          <td class="right mono bold">${inr(t.amount)}</td>
+          <td class="right">${plCell}</td>
+        </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" class="muted">No transactions in ${escapeHtml(analytics.rangeLabel)}.</td></tr>`;
 }
 
 function renderExpenses() {
@@ -424,14 +645,16 @@ function renderExpenses() {
 }
 
 function renderReports() {
-  const invoices = profileScoped(state.invoices);
-  const expenses = profileScoped(state.expenses);
+  const analytics = computeLedgerAnalytics(state.ledgerPeriod);
+  $("reports-range-label").textContent = analytics.rangeLabel;
+  const invoices = analytics.invoices;
+  const expenses = analytics.expenses;
   const taxable = invoices.reduce((s, i) => s + Number(i.subtotal || 0), 0);
   const outGst = invoices.reduce((s, i) => s + Number(i.gstTotal || 0), 0);
   const inGst = expenses.reduce((s, e) => s + Number(e.gstInputAmount || 0), 0);
   const netGst = Math.max(0, outGst - inGst);
   const totalExp = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const profit = taxable - (totalExp - inGst);
+  const profit = analytics.netProfit;
 
   $("rep-taxable-sales").textContent = inr(taxable);
   $("rep-output-gst").textContent = inr(outGst);
@@ -441,8 +664,32 @@ function renderReports() {
   $("rep-pl-summary").innerHTML = `
     <div class="kpi-card"><div class="kpi-label">Total Tax Invoices</div><div class="kpi-value mono">${invoices.length}</div></div>
     <div class="kpi-card"><div class="kpi-label">Gross Revenue (Incl. GST)</div><div class="kpi-value mono">${inr(taxable + outGst)}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Net Estimated Profit</div><div class="kpi-value mono ${profit >= 0 ? "text-emerald" : ""}">${inr(profit)}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Net Profit / Loss</div><div class="kpi-value mono ${profit >= 0 ? "text-profit" : "text-loss"}">${inr(profit)} (${fmtPct(analytics.netPct)})</div></div>
   `;
+}
+
+function printLedgerStatement() {
+  const prof = activeProfile();
+  const a = computeLedgerAnalytics(state.ledgerPeriod);
+  const partyRows = a.parties.map((p) => `<tr><td>${escapeHtml(p.name)}</td><td class="right mono">${inr(p.sales)}</td><td class="right mono" style="color:${p.profit >= 0 ? "#15803D" : "#DC2626"}">${p.hasSales ? `${inr(p.profit)} (${fmtPct(p.pct)})` : "—"}</td><td class="right mono">${inr(p.due)}</td></tr>`).join("");
+  const itemRows = a.items.map((it) => `<tr><td>${escapeHtml(it.name)}</td><td class="right mono">${it.stockQty} ${escapeHtml(it.unit)}</td><td class="right mono">${it.soldQty}</td><td class="right mono">${inr(it.sales)}</td><td class="right mono" style="color:${it.profit >= 0 ? "#15803D" : "#DC2626"}">${it.hasSold ? `${inr(it.profit)} (${fmtPct(it.pct)})` : "—"}</td></tr>`).join("");
+  const txRows = a.transactions.map((t) => `<tr><td class="mono">${new Date(t.ts).toLocaleDateString("en-IN")}</td><td>${escapeHtml(t.type)} ${escapeHtml(t.ref)}</td><td>${escapeHtml(t.party)} — ${escapeHtml(t.items)}</td><td class="right mono">${inr(t.amount)}</td><td class="right mono" style="color:${(t.profit ?? 0) >= 0 ? "#15803D" : "#DC2626"}">${t.pct !== null ? fmtPct(t.pct) : "—"}</td></tr>`).join("");
+
+  $("print-sheet").innerHTML = `
+    <div style="border:1px solid #334155;padding:20px;font-size:12px;">
+      <div style="border-bottom:2px solid #0B253C;padding-bottom:10px;margin-bottom:12px;">
+        <h2 style="margin:0;">${escapeHtml(prof.businessName || "Book")} — Ledger &amp; P&amp;L Statement</h2>
+        <div>Period: ${escapeHtml(a.rangeLabel)} • Net P&amp;L: <strong style="color:${a.netProfit >= 0 ? "#15803D" : "#DC2626"}">${inr(a.netProfit)} (${fmtPct(a.netPct)})</strong> • Stock Value: ${inr(a.stockValue)}</div>
+      </div>
+      <h4>Party-Wise Profit / Loss (%)</h4>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><thead><tr><th>Party</th><th class="right">Sales</th><th class="right">Profit / Loss</th><th class="right">Due</th></tr></thead><tbody>${partyRows}</tbody></table>
+      <h4>Item &amp; Stock Profit / Loss (%)</h4>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><thead><tr><th>Item</th><th class="right">Stock</th><th class="right">Sold</th><th class="right">Sales</th><th class="right">Profit / Loss</th></tr></thead><tbody>${itemRows}</tbody></table>
+      <h4>Transactions (${a.transactions.length})</h4>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Voucher</th><th>Party &amp; Items</th><th class="right">Amount</th><th class="right">P&amp;L %</th></tr></thead><tbody>${txRows}</tbody></table>
+    </div>
+  `;
+  window.print();
 }
 
 function openModal(html) {
@@ -526,7 +773,7 @@ function openReceivePaymentModal() {
         return;
       }
 
-      const bizName = activeProfile().businessName || "Finboss Billing No.1 ERP";
+      const bizName = activeProfile().businessName || "Book";
       let payerName = "";
       let payerPhone = "";
       let refLabel = "";
@@ -582,7 +829,7 @@ function openReceivePaymentModal() {
         `Amount Received: *${inr(amt)}* (${method.toUpperCase()})`,
         `Remaining Balance: ${inr(remaining)}`,
         `Thank you for your payment!`,
-        `_Finboss Billing No.1 ERP_`
+        `_Book_`
       ].join("\n");
 
       openModal(`
@@ -608,7 +855,7 @@ function openReceivePaymentModal() {
 
 function openCreateInvoiceModal() {
   const plain = isPlainNonGst();
-  const invNum = `FB-WEB-${String(Date.now()).slice(-6)}`;
+  const invNum = `BK-WEB-${String(Date.now()).slice(-6)}`;
   const partyOptions = profileScoped(state.parties)
     .map((p) => `<option value="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" data-gstin="${escapeHtml(p.gstin || "")}">${escapeHtml(p.name)}</option>`)
     .join("");
@@ -686,7 +933,7 @@ function openCreateInvoiceModal() {
       discountAmount: 0,
       grandTotal,
       paidAmount: isCredit ? 0 : grandTotal,
-      notes: "Created via Finboss Desktop Web",
+      notes: "Created via Book Desktop Web",
       lineItems: [
         {
           itemId: "",
@@ -838,7 +1085,7 @@ function openSubscriptionModal() {
   let cycle = "yearly";
   const renderPlans = () => {
     openModal(`
-      <h3>Finboss Subscription &amp; Plans</h3>
+      <h3>Book Subscription &amp; Plans</h3>
       <p class="muted">30-Day Free Trial active for new workspaces. Zero bank account or IFSC numbers displayed.</p>
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button id="sub-cyc-m" class="btn ${cycle === "monthly" ? "btn-primary" : "btn-ghost"}">Monthly</button>
@@ -875,7 +1122,7 @@ function openSubscriptionModal() {
 async function openUpiCheckoutModal(tier, cycle) {
   const spec = PLAN_SPECS[tier];
   const amount = cycle === "yearly" ? spec.yearly : spec.monthly;
-  const upiUri = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI_ID)}&pn=${encodeURIComponent(MERCHANT_BENEFICIARY_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Finboss ${spec.name}`)}`;
+  const upiUri = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI_ID)}&pn=${encodeURIComponent(MERCHANT_BENEFICIARY_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Book ${spec.name}`)}`;
 
   openModal(`
     <h3>Secure UPI Checkout • ${spec.name} (${cycle.toUpperCase()})</h3>
@@ -914,9 +1161,9 @@ async function openUpiCheckoutModal(tier, cycle) {
       updatedAt: serverTimestamp()
     });
     const toEmail = state.user.email || ADMIN_RECEIPT_EMAIL;
-    const subject = encodeURIComponent(`Congratulations! Your Finboss ${spec.name} Plan is Now Active`);
+    const subject = encodeURIComponent(`Congratulations! Your Book ${spec.name} Plan is Now Active`);
     const body = encodeURIComponent(
-      `Congratulations! Your Finboss ${spec.name} (${cycle}) plan is now ACTIVE.\nAmount Paid: ₹${amount}\nUPI UTR: ${utr}\nMerchant: ${MERCHANT_BENEFICIARY_NAME} (${MERCHANT_UPI_ID})\nValid until: ${new Date(expiresMs).toDateString()}`
+      `Congratulations! Your Book ${spec.name} (${cycle}) plan is now ACTIVE.\nAmount Paid: ₹${amount}\nUPI UTR: ${utr}\nMerchant: ${MERCHANT_BENEFICIARY_NAME} (${MERCHANT_UPI_ID})\nValid until: ${new Date(expiresMs).toDateString()}`
     );
     window.open(`mailto:${encodeURIComponent(toEmail)}?cc=${encodeURIComponent(ADMIN_RECEIPT_EMAIL)}&subject=${subject}&body=${body}`, "_blank");
     closeModal();
@@ -982,7 +1229,7 @@ function printInvoice(invoice) {
     <div style="border:1px solid #334155;padding:20px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0B253C;padding-bottom:12px;">
         <div>
-          <h2 style="margin:0;">${escapeHtml(prof.businessName || "Finboss Enterprise")}</h2>
+          <h2 style="margin:0;">${escapeHtml(prof.businessName || "Book Enterprise")}</h2>
           <div>GSTIN: ${escapeHtml(prof.gstin || "Plain Non-GST")}</div>
           <div>${escapeHtml(prof.state || "")}</div>
         </div>
@@ -1040,7 +1287,7 @@ document.querySelectorAll("[data-jump-tab]").forEach((btn) => {
 $("topbar-receive-payment-btn").onclick = openReceivePaymentModal;
 $("topbar-new-invoice-btn").onclick = openCreateInvoiceModal;
 $("topbar-whatsapp-btn").onclick = () => {
-  const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+  const biz = activeProfile().businessName || "Book";
   const invoices = profileScoped(state.invoices);
   const expenses = profileScoped(state.expenses);
   const billed = invoices.reduce((s, i) => s + Number(i.grandTotal || 0), 0);
@@ -1053,7 +1300,7 @@ $("topbar-whatsapp-btn").onclick = () => {
     `Collected Revenue: *${inr(collected)}*`,
     `Pending Receivables: ${inr(pending)}`,
     `Operating Expenses: ${inr(expTotal)}`,
-    `_Shared via Finboss Billing No.1 ERP_`
+    `_Shared via Book_`
   ].join("\n");
   shareToWhatsApp(text);
 };
@@ -1063,8 +1310,54 @@ $("parties-add-btn").onclick = openAddPartyModal;
 $("expenses-add-btn").onclick = openAddExpenseModal;
 $("topbar-plan-btn").onclick = openSubscriptionModal;
 $("open-subscription-btn").onclick = openSubscriptionModal;
+$("reports-print-btn").onclick = printLedgerStatement;
+$("ledger-print-btn").onclick = printLedgerStatement;
+$("ledger-wa-btn").onclick = () => {
+  const biz = activeProfile().businessName || "Book";
+  const a = computeLedgerAnalytics(state.ledgerPeriod);
+  const text = [
+    `*${biz} — Ledger & P&L (${a.rangeLabel})*`,
+    `Sales: ${inr(a.totalSales)} • Net P&L: *${inr(a.netProfit)}* (${fmtPct(a.netPct)})`,
+    `Stock Value: ${inr(a.stockValue)}`,
+    `_Shared via Book_`
+  ].join("\n");
+  shareToWhatsApp(text);
+};
+
+document.querySelectorAll("[data-ledger-period]").forEach((btn) => {
+  btn.onclick = () => {
+    state.ledgerPeriod = btn.dataset.ledgerPeriod;
+    document.querySelectorAll("[data-ledger-period], [data-report-period]").forEach((b) => {
+      const p = b.dataset.ledgerPeriod || b.dataset.reportPeriod;
+      b.classList.toggle("active", p === state.ledgerPeriod);
+    });
+    renderParties();
+    renderReports();
+  };
+});
+
+document.querySelectorAll("[data-report-period]").forEach((btn) => {
+  btn.onclick = () => {
+    state.ledgerPeriod = btn.dataset.reportPeriod;
+    document.querySelectorAll("[data-ledger-period], [data-report-period]").forEach((b) => {
+      const p = b.dataset.ledgerPeriod || b.dataset.reportPeriod;
+      b.classList.toggle("active", p === state.ledgerPeriod);
+    });
+    renderParties();
+    renderReports();
+  };
+});
+
+document.querySelectorAll("[data-ledger-view]").forEach((btn) => {
+  btn.onclick = () => {
+    state.ledgerView = btn.dataset.ledgerView;
+    document.querySelectorAll("[data-ledger-view]").forEach((b) => b.classList.toggle("active", b.dataset.ledgerView === state.ledgerView));
+    renderParties();
+  };
+});
+
 $("reports-whatsapp-btn").onclick = () => {
-  const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+  const biz = activeProfile().businessName || "Book";
   const invoices = profileScoped(state.invoices);
   const expenses = profileScoped(state.expenses);
   const taxable = invoices.reduce((s, i) => s + Number(i.subtotal || 0), 0);
@@ -1080,7 +1373,7 @@ $("reports-whatsapp-btn").onclick = () => {
     `Purchase GST ITC: ${inr(inGst)}`,
     `Net GST Liability: *${inr(netGst)}*`,
     `Estimated Net Profit: *${inr(profit)}*`,
-    `_Shared via Finboss Billing No.1 ERP_`
+    `_Shared via Book_`
   ].join("\n");
   shareToWhatsApp(text);
 };
@@ -1126,7 +1419,7 @@ $("billing-invoices-table").onclick = async (e) => {
   if (!inv) return;
   if (btn.dataset.action === "print-inv") printInvoice(inv);
   if (btn.dataset.action === "wa-inv") {
-    const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+    const biz = activeProfile().businessName || "Book";
     const due = Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0));
     const lines = (inv.lineItems || []).map((l, idx) => `${idx + 1}. ${l.name} (${l.qty} ${l.unit}) = ${inr(l.lineTotal)}`).join("\n");
     const text = [
@@ -1139,7 +1432,7 @@ $("billing-invoices-table").onclick = async (e) => {
       `Paid: ${inr(inv.paidAmount)} • Due: ${inr(due)}`,
       inv.irn ? `IRN: ${inv.irn}` : "",
       inv.ewbNumber ? `E-Way Bill: #${inv.ewbNumber}` : "",
-      `_Shared via Finboss Billing No.1 ERP_`
+      `_Shared via Book_`
     ].filter(Boolean).join("\n");
     shareToWhatsApp(text, findPartyPhone(inv.partyId, inv.partyName));
   }
@@ -1164,7 +1457,7 @@ $("billing-invoices-table").onclick = async (e) => {
       irn: fakeHex,
       ackNo: `1126${String(Date.now()).slice(-10)}`,
       ackDate: new Date().toISOString().slice(0, 19).replace("T", " "),
-      signedQrData: `FINBOSS-IRP|${inv.invoiceNumber}|${fakeHex.slice(0, 16)}`,
+      signedQrData: `BOOK-IRP|${inv.invoiceNumber}|${fakeHex.slice(0, 16)}`,
       einvoiceStatus: "generated",
       updatedAt: serverTimestamp()
     });
@@ -1185,14 +1478,14 @@ $("stock-items-table").onclick = async (e) => {
     showToast(`Added +10 ${item.unit} to ${item.name}`);
   }
   if (btn.dataset.action === "wa-stock") {
-    const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+    const biz = activeProfile().businessName || "Book";
     const text = [
       `*Product & Stock • ${biz}*`,
       `Item: *${item.name}* (${item.sku})`,
       item.hsnCode ? `HSN: ${item.hsnCode} • GST: ${Number(item.gstRatePercent || 0)}%` : "",
       `Sale Rate: *${inr(item.salePrice)}* / ${item.unit}`,
       `Available Stock: ${Number(item.stockQty || 0)} ${item.unit}`,
-      `_Shared via Finboss Billing No.1 ERP_`
+      `_Shared via Book_`
     ].filter(Boolean).join("\n");
     shareToWhatsApp(text);
   }
@@ -1203,7 +1496,7 @@ $("parties-table").onclick = (e) => {
   if (!btn) return;
   const p = state.parties.find((x) => x.id === btn.dataset.id);
   if (!p) return;
-  const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+  const biz = activeProfile().businessName || "Book";
   const due = Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0));
   const text = [
     `*Khata Ledger • ${biz}*`,
@@ -1212,7 +1505,7 @@ $("parties-table").onclick = (e) => {
     `Total Billed: ${inr(p.totalBilled || 0)}`,
     `Total Paid: ${inr(p.totalPaid || 0)}`,
     `Net Balance Due: *${inr(due)}*`,
-    `_Shared via Finboss Billing No.1 ERP_`
+    `_Shared via Book_`
   ].filter(Boolean).join("\n");
   shareToWhatsApp(text, p.phone);
 };
@@ -1222,14 +1515,14 @@ $("expenses-table").onclick = (e) => {
   if (!btn) return;
   const exp = state.expenses.find((x) => x.id === btn.dataset.id);
   if (!exp) return;
-  const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
+  const biz = activeProfile().businessName || "Book";
   const text = [
     `*Expense Voucher • ${biz}*`,
     `Title: *${exp.title}*`,
     `Category: ${(exp.category || "").toUpperCase()} • Mode: ${(exp.paymentMethod || "").toUpperCase()}`,
     `Amount: *${inr(exp.amount)}* (${(exp.status || "").toUpperCase()})`,
     exp.gstInputAmount > 0 ? `GST ITC: ${inr(exp.gstInputAmount)}` : "",
-    `_Shared via Finboss Billing No.1 ERP_`
+    `_Shared via Book_`
   ].filter(Boolean).join("\n");
   shareToWhatsApp(text);
 };

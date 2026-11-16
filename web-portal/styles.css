@@ -339,6 +339,33 @@ td {
 .pill-partial { background: #FEF3C7; color: #92400E; }
 .pill-unpaid { background: #FEE2E2; color: #991B1B; }
 .pill-info { background: #E0F2FE; color: #075985; }
+.pill-profit { background: #DCFCE7; color: #15803D; }
+.pill-loss { background: #FEE2E2; color: #DC2626; }
+.text-profit { color: #15803D; font-weight: 700; }
+.text-loss { color: #DC2626; font-weight: 700; }
+
+.period-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-btn {
+  border: 1px solid var(--border);
+  background: #F8FAFC;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chip-btn.active {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
 
 .toast-banner {
   background: #0F172A;

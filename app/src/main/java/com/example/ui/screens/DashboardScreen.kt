@@ -40,15 +40,18 @@ import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PendingActions
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -59,6 +62,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Inventory2
@@ -117,12 +121,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
+import com.example.ai.BookAiViewModel
 import com.example.auth.signOutUser
 import com.example.data.model.BusinessProfile
 import com.example.data.model.DashboardEntry
+import com.example.data.model.ErpExpense
 import com.example.data.model.ErpModuleConfig
 import com.example.data.model.GstInvoice
 import com.example.data.model.PhoneAccessGrant
@@ -155,6 +162,7 @@ private enum class DashboardTab {
   PARTIES,
   EXPENSES,
   REPORTS,
+  AI_COPILOT,
   WORKSPACE,
 }
 
@@ -218,10 +226,13 @@ fun DashboardScreen(
         if (effectivePermissions.canViewReports) {
           add(DashboardTab.REPORTS)
         }
+        add(DashboardTab.AI_COPILOT)
         add(DashboardTab.WORKSPACE)
       }
     }
 
+  val aiViewModel: BookAiViewModel = viewModel()
+  var aiCopilotMode by rememberSaveable { mutableStateOf(AiCopilotMode.CHAT) }
   var selectedTab by rememberSaveable { mutableStateOf(DashboardTab.OVERVIEW) }
   var showProfilesSheet by remember { mutableStateOf(false) }
   var editingProfileSlot by remember { mutableStateOf<Pair<String, BusinessProfile?>?>(null) }
@@ -291,7 +302,7 @@ fun DashboardScreen(
                 showBackupSheet = false
               }
               .onFailure { err ->
-                viewModel.notifyBanner(err.localizedMessage ?: "Invalid Finboss backup JSON")
+                viewModel.notifyBanner(err.localizedMessage ?: "Invalid Book backup JSON")
               }
           }
           .onFailure { err ->
@@ -302,7 +313,7 @@ fun DashboardScreen(
 
   val triggerExportBackup: () -> Unit = {
     val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-    exportBackupLauncher.launch("finboss_erp_backup_$stamp.json")
+    exportBackupLauncher.launch("book_backup_$stamp.json")
   }
 
   val triggerRestoreBackup: () -> Unit = {
@@ -385,7 +396,11 @@ fun DashboardScreen(
                 containerColor = MaterialTheme.colorScheme.background,
               ),
             navigationIcon = {
-              if (selectedTab == DashboardTab.EXPENSES || selectedTab == DashboardTab.REPORTS) {
+              if (
+                selectedTab == DashboardTab.EXPENSES ||
+                  selectedTab == DashboardTab.REPORTS ||
+                  selectedTab == DashboardTab.AI_COPILOT
+              ) {
                 IconButton(
                   onClick = { selectedTab = DashboardTab.OVERVIEW },
                   modifier = Modifier.testTag("subscreen_back_button"),
@@ -410,6 +425,7 @@ fun DashboardScreen(
                       DashboardTab.EXPENSES -> "Expenses & Cashbook"
                       DashboardTab.REPORTS ->
                         if (isPlainNonGst) "Business P&L Reports" else "GST & Tax Reports"
+                      DashboardTab.AI_COPILOT -> "Book AI Copilot"
                       DashboardTab.WORKSPACE -> "Workspace & Modules"
                     },
                   style = MaterialTheme.typography.titleLarge,
@@ -428,6 +444,19 @@ fun DashboardScreen(
               }
             },
             actions = {
+              IconButton(
+                onClick = {
+                  aiCopilotMode = AiCopilotMode.CHAT
+                  selectedTab = DashboardTab.AI_COPILOT
+                },
+                modifier = Modifier.testTag("topbar_ai_copilot_button"),
+              ) {
+                Icon(
+                  imageVector = Icons.Filled.AutoAwesome,
+                  contentDescription = "Open Book AI Assistant",
+                  tint = MaterialTheme.colorScheme.secondary,
+                )
+              }
               if (!isSalesmanSession) {
                 Surface(
                   color =
@@ -624,6 +653,7 @@ fun DashboardScreen(
                 )
               }
             DashboardTab.REPORTS,
+            DashboardTab.AI_COPILOT,
             DashboardTab.WORKSPACE -> {}
           }
         },
@@ -719,6 +749,10 @@ fun DashboardScreen(
                       chooserTitle = "Share Business Overview on WhatsApp",
                     )
                   },
+                  onOpenAiMode = { mode ->
+                    aiCopilotMode = mode
+                    selectedTab = DashboardTab.AI_COPILOT
+                  },
                   onRetryWorkspace = { viewModel.initializeWorkspace() },
                 )
               DashboardTab.BILLING ->
@@ -804,6 +838,12 @@ fun DashboardScreen(
                   onOpenAddPartyDialog = { if (effectivePermissions.canManageParties) showAddPartyDialog = true },
                   canManageParties = effectivePermissions.canManageParties,
                   businessName = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise",
+                  invoices = invoices,
+                  inventory = inventory,
+                  expenses = expenses,
+                  entries = entries,
+                  profile = profile,
+                  isPlainNonGst = isPlainNonGst,
                 )
               DashboardTab.EXPENSES ->
                 ExpensesModuleContent(
@@ -833,8 +873,126 @@ fun DashboardScreen(
                   invoices = invoices,
                   expenses = expenses,
                   entries = entries,
+                  parties = parties,
+                  inventory = inventory,
                   currency = currency,
                   onSwitchProfileClick = { showProfilesSheet = true },
+                )
+              DashboardTab.AI_COPILOT ->
+                AiCopilotScreenContent(
+                  aiViewModel = aiViewModel,
+                  initialMode = aiCopilotMode,
+                  profile = profile,
+                  currency = currency,
+                  isPlainNonGst = isPlainNonGst,
+                  parties = parties,
+                  inventory = inventory,
+                  invoices = invoices,
+                  expenses = expenses,
+                  entries = entries,
+                  isBusy = isBusy,
+                  canCreateInvoices = effectivePermissions.canCreateInvoices,
+                  canManageExpenses = effectivePermissions.canManageExpenses,
+                  onSaveVoiceDraft = { draft ->
+                    val matchedParty =
+                      draft.matchedPartyId.takeIf { it.isNotBlank() }?.let { pid ->
+                        parties.firstOrNull { it.id == pid }
+                      }
+                    if (draft.isInvoice) {
+                      val lines = draft.lineItems.map { it.toInvoiceLineItem(isPlainNonGst) }
+                      val invNo = "BK-AI-${System.currentTimeMillis().toString().takeLast(5)}"
+                      val invType =
+                        if (isPlainNonGst) GstInvoice.TYPE_POS_BILL else GstInvoice.TYPE_TAX_INVOICE
+                      val taxMode =
+                        if (isPlainNonGst) GstInvoice.TAX_MODE_NONE else GstInvoice.TAX_MODE_CGST_SGST
+                      viewModel.createInvoice(
+                        invoiceNumber = invNo,
+                        party = matchedParty,
+                        walkInPartyName = draft.partyName.ifBlank { "Walk-in Customer" },
+                        walkInPartyGstin = draft.partyGstin,
+                        invoiceType = invType,
+                        taxMode = taxMode,
+                        paymentMethod = draft.paymentMethod,
+                        discountAmount = draft.discountAmount,
+                        paidAmount = draft.paidAmount,
+                        notes = draft.notes.ifBlank { "Voice AI: ${draft.transcript}".take(160) },
+                        lineItems = lines,
+                        onDone = {
+                          aiViewModel.resetVoiceState()
+                          selectedTab = DashboardTab.BILLING
+                        },
+                      )
+                    } else {
+                      viewModel.saveExpense(
+                        existingId = null,
+                        title = draft.expenseTitle.ifBlank { "Voice Expense" },
+                        category = draft.expenseCategory,
+                        paymentMethod = draft.paymentMethod,
+                        status = ErpExpense.STATUS_SETTLED,
+                        party = matchedParty,
+                        partyNameFallback = draft.partyName,
+                        referenceNo = "VOICE-${System.currentTimeMillis().toString().takeLast(4)}",
+                        amount = draft.expenseAmount,
+                        gstInputAmount = draft.gstInputAmount,
+                        notes = draft.notes.ifBlank { draft.transcript.take(160) },
+                        onDone = {
+                          aiViewModel.resetVoiceState()
+                          selectedTab = DashboardTab.EXPENSES
+                        },
+                      )
+                    }
+                  },
+                  onSaveOcrExpense = { bill ->
+                    val matchedParty =
+                      bill.matchedPartyId.takeIf { it.isNotBlank() }?.let { pid ->
+                        parties.firstOrNull { it.id == pid }
+                      }
+                    viewModel.saveExpense(
+                      existingId = null,
+                      title = "Bill: ${bill.partyName}".take(80),
+                      category = bill.expenseCategory,
+                      paymentMethod = bill.paymentMethod,
+                      status = ErpExpense.STATUS_SETTLED,
+                      party = matchedParty,
+                      partyNameFallback = bill.partyName,
+                      referenceNo = bill.billOrInvoiceNumber.ifBlank { "OCR-${System.currentTimeMillis().toString().takeLast(4)}" },
+                      amount = bill.grandTotal,
+                      gstInputAmount = if (isPlainNonGst) 0.0 else bill.gstAmount,
+                      notes = bill.notes.ifBlank { "Scanned bill (${bill.billDate})" },
+                      onDone = {
+                        aiViewModel.resetOcrState()
+                        selectedTab = DashboardTab.EXPENSES
+                      },
+                    )
+                  },
+                  onSaveOcrInvoice = { bill ->
+                    val matchedParty =
+                      bill.matchedPartyId.takeIf { it.isNotBlank() }?.let { pid ->
+                        parties.firstOrNull { it.id == pid }
+                      }
+                    val lines = bill.lineItems.map { it.toInvoiceLineItem(isPlainNonGst) }
+                    val invNo =
+                      bill.billOrInvoiceNumber.ifBlank {
+                        "BK-OCR-${System.currentTimeMillis().toString().takeLast(4)}"
+                      }
+                    viewModel.createInvoice(
+                      invoiceNumber = invNo,
+                      party = matchedParty,
+                      walkInPartyName = bill.partyName.ifBlank { "Walk-in Customer" },
+                      walkInPartyGstin = bill.partyGstin,
+                      invoiceType = if (isPlainNonGst) GstInvoice.TYPE_POS_BILL else GstInvoice.TYPE_TAX_INVOICE,
+                      taxMode = if (isPlainNonGst) GstInvoice.TAX_MODE_NONE else GstInvoice.TAX_MODE_CGST_SGST,
+                      paymentMethod = bill.paymentMethod,
+                      discountAmount = 0.0,
+                      paidAmount = bill.grandTotal,
+                      notes = bill.notes.ifBlank { "OCR scanned invoice (${bill.billDate})" },
+                      lineItems = lines,
+                      onDone = {
+                        aiViewModel.resetOcrState()
+                        selectedTab = DashboardTab.BILLING
+                      },
+                    )
+                  },
                 )
               DashboardTab.WORKSPACE ->
                 WorkspaceTabContent(
@@ -1179,6 +1337,7 @@ private fun OverviewTabContent(
   onMarkPaid: (String) -> Unit,
   onDeleteEntry: (String) -> Unit,
   onShareOverviewWhatsApp: () -> Unit = {},
+  onOpenAiMode: (AiCopilotMode) -> Unit = {},
   onRetryWorkspace: () -> Unit,
 ) {
   val profile = (profileState as? UiState.Success)?.data
@@ -1273,6 +1432,72 @@ private fun OverviewTabContent(
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text("Share Business Summary on WhatsApp", color = MaterialTheme.colorScheme.secondary)
+      }
+    }
+
+    item {
+      Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().testTag("overview_ai_copilot_card"),
+      ) {
+        Column(
+          modifier = Modifier.fillMaxWidth().padding(14.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Icon(
+              imageVector = Icons.Filled.AutoAwesome,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "Book AI Copilot",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+              )
+              Text(
+                text = "Analyze Sales, Party P&L % & Stock • Voice Bill • OCR Scanner",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+              )
+            }
+          }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Button(
+              onClick = { onOpenAiMode(AiCopilotMode.CHAT) },
+              modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("overview_ai_chat_btn"),
+            ) {
+              Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(4.dp))
+              Text("AI Chat", maxLines = 1)
+            }
+            OutlinedButton(
+              onClick = { onOpenAiMode(AiCopilotMode.VOICE) },
+              modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("overview_ai_voice_btn"),
+            ) {
+              Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(4.dp))
+              Text("Voice Bill", maxLines = 1)
+            }
+            OutlinedButton(
+              onClick = { onOpenAiMode(AiCopilotMode.OCR) },
+              modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("overview_ai_ocr_btn"),
+            ) {
+              Icon(Icons.Filled.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(4.dp))
+              Text("Scan Bill", maxLines = 1)
+            }
+          }
+        }
       }
     }
 
@@ -1663,7 +1888,7 @@ private fun ExecutiveWorkspaceCard(
           }
           Spacer(modifier = Modifier.height(8.dp))
           Text(
-            text = if (isLoading) "Loading workspace…" else (profile?.businessName ?: "Finboss Enterprise"),
+            text = if (isLoading) "Loading workspace…" else (profile?.businessName ?: "Book Enterprise"),
             style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
           )
@@ -2494,7 +2719,7 @@ private fun WorkspaceTabContent(
     if (!isSalesmanSession) {
       item {
         Text(
-          text = "Finboss ERP Modules Roadmap",
+          text = "Book Modules Roadmap",
           style = MaterialTheme.typography.titleLarge,
           modifier = Modifier.padding(top = 4.dp),
         )
@@ -2606,6 +2831,7 @@ private fun tabIcon(tab: DashboardTab, selected: Boolean): ImageVector =
     DashboardTab.PARTIES -> if (selected) Icons.Filled.Groups else Icons.Outlined.Groups
     DashboardTab.EXPENSES -> if (selected) Icons.Filled.Payments else Icons.Outlined.Payments
     DashboardTab.REPORTS -> if (selected) Icons.Filled.Assessment else Icons.Outlined.Assessment
+    DashboardTab.AI_COPILOT -> if (selected) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome
     DashboardTab.WORKSPACE -> if (selected) Icons.Filled.Settings else Icons.Outlined.Settings
   }
 
@@ -2617,6 +2843,7 @@ private fun tabLabel(tab: DashboardTab): String =
     DashboardTab.PARTIES -> "Parties"
     DashboardTab.EXPENSES -> "Expenses"
     DashboardTab.REPORTS -> "GST Reports"
+    DashboardTab.AI_COPILOT -> "Book AI"
     DashboardTab.WORKSPACE -> "Workspace"
   }
 

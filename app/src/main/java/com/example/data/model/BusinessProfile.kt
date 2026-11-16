@@ -11,7 +11,7 @@ data class BusinessProfile(
   val userId: String = "",
   val ownerName: String = "",
   val ownerEmail: String? = null,
-  val businessName: String = "Finboss Enterprise",
+  val businessName: String = "Book Enterprise",
   val gstin: String = "",
   val address: String = "",
   val state: String = "",

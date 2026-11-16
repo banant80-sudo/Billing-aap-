@@ -127,7 +127,7 @@ fun AppSettingsSheet(
           Icon(Icons.Filled.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
           Column {
             Text(
-              text = "Finboss ERP Settings & Logic",
+              text = "Book Settings & Logic",
               style = MaterialTheme.typography.headlineSmall,
               fontWeight = FontWeight.Bold,
             )

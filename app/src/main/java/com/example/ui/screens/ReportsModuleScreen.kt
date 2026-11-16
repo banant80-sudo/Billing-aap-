@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,21 +56,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BusinessProfile
 import com.example.data.model.DashboardEntry
 import com.example.data.model.ErpExpense
+import com.example.data.model.ErpParty
 import com.example.data.model.GstInvoice
+import com.example.data.model.InventoryItem
 import com.example.ui.theme.MonoMetricLarge
 import com.example.ui.theme.MonoMetricMedium
+import com.example.util.LedgerAnalyticsEngine
+import com.example.util.LedgerPeriod
+import com.example.util.LedgerReportPdfPrinter
 import com.example.util.WhatsAppShareHelper
-import java.util.Calendar
-
-private enum class ReportPeriod(val label: String) {
-  THIS_MONTH("This Month"),
-  LAST_30_DAYS("Last 30 Days"),
-  ALL_TIME("All Time"),
-}
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class TaxSlabSummary(
   val ratePercent: Int,
@@ -78,44 +86,70 @@ fun ReportsModuleContent(
   invoices: List<GstInvoice>,
   expenses: List<ErpExpense>,
   entries: List<DashboardEntry>,
+  parties: List<ErpParty> = emptyList(),
+  inventory: List<InventoryItem> = emptyList(),
   currency: String,
   onSwitchProfileClick: () -> Unit = {},
 ) {
   val context = LocalContext.current
-  var period by rememberSaveable { mutableStateOf(ReportPeriod.THIS_MONTH) }
+  val coroutineScope = rememberCoroutineScope()
+  var period by rememberSaveable { mutableStateOf(LedgerPeriod.THIS_MONTH) }
   val isPlainNonGst = profile?.isPlainNonGst == true
 
-  val cutoffMs =
-    remember(period) {
-      val cal = Calendar.getInstance()
-      when (period) {
-        ReportPeriod.THIS_MONTH -> {
-          cal.set(Calendar.DAY_OF_MONTH, 1)
-          cal.set(Calendar.HOUR_OF_DAY, 0)
-          cal.set(Calendar.MINUTE, 0)
-          cal.set(Calendar.SECOND, 0)
-          cal.set(Calendar.MILLISECOND, 0)
-          cal.timeInMillis
-        }
-        ReportPeriod.LAST_30_DAYS -> System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-        ReportPeriod.ALL_TIME -> 0L
-      }
-    }
+  val dateRange = remember(period) { LedgerAnalyticsEngine.resolveDateRange(period) }
 
   val filteredInvoices =
-    remember(invoices, cutoffMs) {
-      if (cutoffMs == 0L) invoices
-      else invoices.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) >= cutoffMs }
+    remember(invoices, dateRange) {
+      invoices.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) in dateRange.startMs..dateRange.endMs }
     }
   val filteredExpenses =
-    remember(expenses, cutoffMs) {
-      if (cutoffMs == 0L) expenses
-      else expenses.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) >= cutoffMs }
+    remember(expenses, dateRange) {
+      expenses.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) in dateRange.startMs..dateRange.endMs }
     }
   val filteredEntries =
-    remember(entries, cutoffMs) {
-      if (cutoffMs == 0L) entries
-      else entries.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) >= cutoffMs }
+    remember(entries, dateRange) {
+      entries.filter { (it.createdAt?.toDate()?.time ?: System.currentTimeMillis()) in dateRange.startMs..dateRange.endMs }
+    }
+
+  val ledgerAnalytics =
+    remember(period, parties, inventory, invoices, expenses, entries, isPlainNonGst) {
+      LedgerAnalyticsEngine.buildReport(
+        period = period,
+        parties = parties,
+        inventory = inventory,
+        invoices = invoices,
+        expenses = expenses,
+        entries = entries,
+        isPlainNonGst = isPlainNonGst,
+      )
+    }
+
+  val downloadLedgerLauncher =
+    rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { targetUri ->
+      if (targetUri == null) return@rememberLauncherForActivityResult
+      coroutineScope.launch {
+        val res =
+          withContext(Dispatchers.IO) {
+            runCatching {
+              context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                LedgerReportPdfPrinter.writeLedgerPdfToStream(
+                  report = ledgerAnalytics,
+                  profile = profile,
+                  currency = currency,
+                  isPlainNonGst = isPlainNonGst,
+                  outputStream = out,
+                )
+              } ?: error("Unable to open destination PDF file")
+            }
+          }
+        Toast.makeText(
+          context,
+          if (res.isSuccess) "Report PDF downloaded" else (res.exceptionOrNull()?.localizedMessage ?: "Download failed"),
+          Toast.LENGTH_SHORT,
+        ).show()
+      }
     }
 
   val report =
@@ -197,14 +231,22 @@ fun ReportsModuleContent(
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     item {
-      LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(ReportPeriod.entries) { p ->
-          FilterChip(
-            selected = period == p,
-            onClick = { period = p },
-            label = { Text(p.label) },
-          )
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          items(LedgerPeriod.entries) { p ->
+            FilterChip(
+              selected = period == p,
+              onClick = { period = p },
+              label = { Text(p.label) },
+              modifier = Modifier.testTag("reports_period_chip_${p.key}"),
+            )
+          }
         }
+        Text(
+          text = dateRange.rangeLabel,
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
       }
     }
 
@@ -409,15 +451,111 @@ fun ReportsModuleContent(
           )
           ReportMetricRow("Operating Expenses", formatErpMoney(currency, report.totalOperatingExpenses))
           HorizontalDivider()
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Estimated Net Profit", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              ProfitLossPercentBadge(
+                profitAmount = ledgerAnalytics.netProfitAmount,
+                profitPercent = ledgerAnalytics.netProfitPercent,
+                currency = currency,
+                showAmount = false,
+              )
+              Text(
+                text = formatErpMoney(currency, report.netProfit),
+                style = MonoMetricMedium,
+                color = if (report.netProfit >= 0.0) ProfitGreenText else LossRedText,
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // Item-wise Profit / Loss (%) Card
+    item {
+      val activeItems = ledgerAnalytics.itemSummaries.filter { it.hasSoldActivity }
+      Card(
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth().testTag("reports_item_profit_card"),
+      ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Item-Wise Profit / Loss (%)", style = MaterialTheme.typography.titleMedium)
+          if (activeItems.isEmpty()) {
             Text(
-              text = formatErpMoney(currency, report.netProfit),
-              style = MonoMetricMedium,
-              color =
-                if (report.netProfit >= 0.0) MaterialTheme.colorScheme.secondary
-                else MaterialTheme.colorScheme.error,
+              text = "No item sales in ${period.label.lowercase()} yet.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+          } else {
+            activeItems.take(8).forEach { item ->
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(item.itemName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text(
+                    text = "Sales ${formatErpMoney(currency, item.salesValue)} • Cost ${formatErpMoney(currency, item.costOfSold)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+                }
+                ProfitLossPercentBadge(
+                  profitAmount = item.profitAmount,
+                  profitPercent = item.profitPercent,
+                  currency = currency,
+                  showAmount = true,
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Party-wise Profit / Loss (%) Card
+    item {
+      val activeParties = ledgerAnalytics.partySummaries.filter { it.hasSalesActivity }
+      Card(
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth().testTag("reports_party_profit_card"),
+      ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Party-Wise Profit / Loss (%)", style = MaterialTheme.typography.titleMedium)
+          if (activeParties.isEmpty()) {
+            Text(
+              text = "No party sales in ${period.label.lowercase()} yet.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          } else {
+            activeParties.take(8).forEach { party ->
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(party.partyName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text(
+                    text = "${party.transactionCount} bills • Sales ${formatErpMoney(currency, party.salesNetRevenue)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+                }
+                ProfitLossPercentBadge(
+                  profitAmount = party.profitAmount,
+                  profitPercent = party.profitPercent,
+                  currency = currency,
+                  showAmount = true,
+                )
+              }
+            }
           }
         }
       }
@@ -425,6 +563,37 @@ fun ReportsModuleContent(
 
     item {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          Button(
+            onClick = {
+              runCatching {
+                LedgerReportPdfPrinter.printLedgerReport(
+                  context = context,
+                  report = ledgerAnalytics,
+                  profile = profile,
+                  currency = currency,
+                  isPlainNonGst = isPlainNonGst,
+                )
+              }.onFailure { err ->
+                Toast.makeText(context, err.localizedMessage ?: "Print failed", Toast.LENGTH_SHORT).show()
+              }
+            },
+            modifier = Modifier.weight(1f).heightIn(min = 50.dp).testTag("reports_print_pdf_button"),
+          ) {
+            Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Print PDF")
+          }
+          OutlinedButton(
+            onClick = { downloadLedgerLauncher.launch(LedgerReportPdfPrinter.buildPdfFileName(period)) },
+            modifier = Modifier.weight(1f).heightIn(min = 50.dp).testTag("reports_download_pdf_button"),
+          ) {
+            Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Download PDF")
+          }
+        }
+
         Button(
           onClick = {
             val text = buildShareableTaxReport(profile, period, report, currency, isPlainNonGst)
@@ -433,8 +602,8 @@ fun ReportsModuleContent(
                 type = "text/plain"
                 putExtra(
                   Intent.EXTRA_SUBJECT,
-                  if (isPlainNonGst) "Finboss Business P&L Summary (${period.label})"
-                  else "Finboss GST & P&L Report (${period.label})",
+                  if (isPlainNonGst) "Book Business P&L Summary (${period.label})"
+                  else "Book GST & P&L Report (${period.label})",
                 )
                 putExtra(Intent.EXTRA_TEXT, text)
               }
@@ -500,12 +669,12 @@ private fun ReportMetricRow(label: String, value: String) {
 
 private fun buildShareableTaxReport(
   profile: BusinessProfile?,
-  period: ReportPeriod,
+  period: LedgerPeriod,
   report: GstReportMetrics,
   currency: String,
   isPlainNonGst: Boolean = false,
 ): String = buildString {
-  appendLine(profile?.businessName ?: "Finboss Billing No.1 ERP")
+  appendLine(profile?.businessName ?: "Book")
   if (!isPlainNonGst && !profile?.gstin.isNullOrBlank()) appendLine("GSTIN: ${profile?.gstin}")
   appendLine(
     if (isPlainNonGst) "Business P&L Summary (${period.label})"
@@ -522,4 +691,5 @@ private fun buildShareableTaxReport(
   appendLine("Net Revenue: ${formatErpMoney(currency, report.totalRevenue)}")
   appendLine("Operating Expenses: ${formatErpMoney(currency, report.totalOperatingExpenses)}")
   appendLine("Net Profit: ${formatErpMoney(currency, report.netProfit)}")
+  appendLine("_Shared via Book_")
 }
