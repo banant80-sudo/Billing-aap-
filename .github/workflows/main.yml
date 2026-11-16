@@ -22,10 +22,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Release Keystore
+      - name: Generate Release Keystore & Fallback Client ID
         run: |
           keytool -genkey -v -keystore release.keystore -storepass android123 -alias finbosskey -keypass android123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Finboss,O=RaghavEnterprises,C=IN"
           cp release.keystore my-upload-key.jks
+          if ! grep -q "client_type\": 3" app/google-services.json 2>/dev/null; then
+            mkdir -p app/src/main/res/values
+            cat <<EOF > app/src/main/res/values/google_services_fix.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="default_web_client_id" translatable="false">000000000000-placeholder.apps.googleusercontent.com</string>
+          </resources>
+          EOF
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
