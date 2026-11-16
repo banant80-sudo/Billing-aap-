@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -19,17 +22,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Release Keystore & Firebase String
+      - name: Generate Release Keystore
         run: |
           keytool -genkey -v -keystore release.keystore -storepass android123 -alias finbosskey -keypass android123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Finboss,O=RaghavEnterprises,C=IN"
           cp release.keystore my-upload-key.jks
-          mkdir -p app/src/main/res/values
-          cat <<EOF > app/src/main/res/values/google_services_fix.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="default_web_client_id" translatable="false">000000000000-placeholder.apps.googleusercontent.com</string>
-          </resources>
-          EOF
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -54,3 +50,12 @@ jobs:
         with:
           name: Finboss-Billing-Signed-APK
           path: Finboss-Billing-Signed.apk
+
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0-latest
+          name: Finboss Billing App (Signed Release)
+          files: Finboss-Billing-Signed.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
