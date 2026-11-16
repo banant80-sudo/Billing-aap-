@@ -1,31 +1,20 @@
-# Firebase Cloud Functions GST backend — Sandbox.co.in adapter
+# Firebase Cloud Functions GST backend — WhiteBooks adapter
 
-The Finboss app uses Firebase for sign-in and data. GST API calls go through this Cloud Functions backend, so Sandbox API credentials and GST taxpayer tokens are never sent to the browser or Android app.
+The Finboss app uses Firebase for sign-in and data. GST API calls pass through this Cloud Functions backend, keeping WhiteBooks client credentials and GST access tokens off the Android/web clients.
 
-## Included endpoints
+## WhiteBooks endpoints implemented
 
-- Firebase-authenticated OTP request and OTP verification using Sandbox.co.in's GST compliance API.
-- OTP throttling per signed-in user and GST business profile.
-- Taxpayer access token encrypted with AES-256-GCM in the user's Firestore `gst_sessions` subcollection. Firestore rules deny client access; only Cloud Functions Admin SDK accesses these records.
-- GSTR-1 save request to Sandbox's documented year/month endpoint.
-- Firebase Hosting rewrite from `/api/**` to the `gstApi` function.
+- OTP request: `GET /authentication/otprequest?email=...`
+- OTP verification/token: `GET /authentication/authtoken?email=...&otp=...`
+- Save GSTR-1 draft: `PUT /gstr1/retsave?email=...`
 
-## Provider contract used
+The API base defaults to `https://apisandbox.whitebooks.in`. Production may use `https://api.whitebooks.in` only when your WhiteBooks account is approved and configured for production.
 
-The adapter uses Sandbox API host `https://api.sandbox.co.in`:
+OTP-request transaction IDs are encrypted server-side for 10 minutes and used only during verification. The taxpayer access token is encrypted at rest in Firestore and never returned to the app. Each request requires a valid Firebase ID token. OTP requests are throttled per user/business profile.
 
-1. `POST /authenticate` with `x-api-key`, `x-api-secret`, and `x-api-version` to get a Sandbox API token.
-2. `POST /gst/compliance/tax-payer/otp` with the taxpayer username and GSTIN to request OTP.
-3. `POST /gst/compliance/tax-payer/otp/verify?otp=...` with username and GSTIN to obtain the six-hour taxpayer token.
-4. `POST /gst/compliance/tax-payer/gstrs/gstr-1/{year}/{month}` with the documented GSTR-1 return JSON and taxpayer token to save the return.
+## Configure Firebase
 
-Sandbox API details and account/plan requirements can change; verify the exact contract in your Sandbox developer dashboard and test using a sandbox GSTIN before production. A successful GSTR-1 save request is not the same as filing the return; proceed-to-file, EVC/DSC verification, and filing-status steps are separate flows and are not implemented here.
-
-The GSTR-1 endpoint accepts `returnData`, an object formatted to Sandbox's current GSTN return schema. The backend sets/overrides `gstin` and `fp` from the authenticated business profile and `MMYYYY` period. It does not convert the app's invoice records into all applicable GSTR-1 sections, calculate HSN summaries, or certify tax correctness.
-
-## Firebase setup and deployment
-
-1. Enable Cloud Functions for the Firebase project associated with Finboss. Firebase Functions deployment may require the Blaze (pay-as-you-go) plan; check the current Firebase plan requirements before deploying.
+1. Enable Cloud Functions for the Firebase project associated with Finboss. Cloud Functions deployment may require the Blaze (pay-as-you-go) plan; verify current Firebase plan requirements.
 2. Install Firebase CLI, sign in, and select the correct project from the repository root:
 
    ```bash
@@ -33,34 +22,33 @@ The GSTR-1 endpoint accepts `returnData`, an object formatted to Sandbox's curre
    firebase use <your-project-id>
    ```
 
-3. Set Sandbox API credentials in Firebase Secret Manager. Do not commit credentials or paste them into the frontend:
+3. Configure WhiteBooks credentials in Firebase Secret Manager (do not commit real credentials):
 
    ```bash
-   firebase functions:secrets:set SANDBOX_API_KEY
-   firebase functions:secrets:set SANDBOX_API_SECRET
+   firebase functions:secrets:set GSP_CLIENT_ID
+   firebase functions:secrets:set GSP_CLIENT_SECRET
    ```
 
-4. Generate a 32-byte encryption key and set it as a secret:
+4. Generate and set a 32-byte encryption key:
 
    ```bash
    openssl rand -base64 32
    firebase functions:secrets:set GSP_TOKEN_ENCRYPTION_KEY
    ```
 
-   Keep this key backed up securely. Rotating it makes stored taxpayer sessions unreadable; users must authenticate again.
+   Keep the key securely backed up. Rotating it invalidates currently stored encrypted GST sessions.
 
-5. Create `functions/.env.<your-project-id>` locally (do not commit it) with allowed web origins. Defaults are the Sandbox production API host, API version `1.0.0`, and source `primary`:
+5. Create `functions/.env.<your-project-id>` locally; do not commit it. Set the IP WhiteBooks has authorized for your account and the exact portal origins:
 
    ```dotenv
+   GSP_BASE_URL=https://apisandbox.whitebooks.in
+   GSP_IP_ADDRESS=YOUR_PROVIDER_APPROVED_SERVER_IP
    GST_ALLOWED_ORIGINS=https://your-finboss-host.web.app,https://your-finboss-host.firebaseapp.com,http://localhost:8080
-   SANDBOX_BASE_URL=https://api.sandbox.co.in
-   SANDBOX_API_VERSION=1.0.0
-   SANDBOX_GST_SOURCE=primary
    ```
 
-   The Firebase Hosting origin must be listed exactly. Android requests do not use browser CORS, but still require a Firebase ID token.
+   Confirm whether Cloud Functions' outbound IP meets WhiteBooks allowlisting requirements; serverless outbound IP may not be stable without configured static egress.
 
-6. Install and deploy:
+6. Install and deploy to the selected Firebase project:
 
    ```bash
    cd functions && npm install && cd ..
@@ -68,19 +56,19 @@ The GSTR-1 endpoint accepts `returnData`, an object formatted to Sandbox's curre
    firebase deploy --only hosting --config web-portal/firebase.hosting.json
    ```
 
-   Deploy both to the same Firebase project. Hosting routes `/api/**` to `gstApi` in `asia-south1`.
+   The Hosting rewrite sends `/api/**` to the `gstApi` function in `asia-south1`.
 
-## API calls
+## App API
 
-Every endpoint requires `Authorization: Bearer <Firebase ID token>` for the signed-in Finboss user. Use JSON and call `/api/gst/...` on the deployed Hosting origin. Never send Sandbox API secrets or the taxpayer access token from the client.
+Every route requires `Authorization: Bearer <Firebase ID token>` and JSON requests to `/api/gst/...`.
 
-- `POST /api/gst/request-otp` — `{ "profileId": "main_1", "gstin": "...", "gstUsername": "..." }`
-- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The taxpayer token is encrypted and stored server-side; it is not returned to the client.
-- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { "b2b": [], "...": "other applicable GSTR-1 sections" } }`. `returnData` must follow the Sandbox/GSTN schema.
-- `POST /api/gst/logout` — `{ "profileId": "main_1" }` deletes that profile's encrypted session.
+- `POST /api/gst/request-otp` — `{ "profileId": "main_1", "gstin": "...", "gstUsername": "...", "email": "..." }`
+- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The pending transaction ID must match the OTP request and is handled server-side.
+- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { ... } }`. `returnData` must match WhiteBooks' current GSTN GSTR-1 schema. The backend sets GSTIN and `fp` from the authenticated profile/period.
+- `POST /api/gst/logout` — `{ "profileId": "main_1" }` clears encrypted session data.
 
-The GSTIN must match `users/{uid}/business_profiles/{profileId}`. Plain non-GST profile IDs are rejected. The browser/app must obtain the Firebase ID token from Firebase Auth and send it as a Bearer token. The frontend UI is not yet wired to these endpoints.
+The business profile GSTIN must match the request. Non-GST profile IDs are rejected. The UI still needs to send the required email field and create a valid GSTR-1 return object from invoice records; arbitrary invoice arrays are not a compliant GSTR-1 payload.
 
-## Important operational note
+## Important
 
-Sandbox's API token, taxpayer token, allowed API plan, account configuration, and GSTR-1 schema must be tested with your own Sandbox account. No live request has been made from this code change, and deployment/secrets are not configured automatically by committing these files.
+`PUT /gstr1/retsave` saves/prepares return data; it does not by itself complete or file the legal return. Final filing, verification/signature and status checks are separate operations and are not implemented. Verify the exact current endpoint headers, response fields, account requirements, and payload schema in your WhiteBooks developer portal and sandbox before production use. The API adapter has not been deployed or tested against a live provider account.

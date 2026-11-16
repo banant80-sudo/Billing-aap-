@@ -7,14 +7,11 @@ const { defineSecret } = require("firebase-functions/params");
 
 admin.initializeApp();
 const db = admin.firestore();
-const sandboxApiKey = defineSecret("SANDBOX_API_KEY");
-const sandboxApiSecret = defineSecret("SANDBOX_API_SECRET");
+const clientIdSecret = defineSecret("GSP_CLIENT_ID");
+const clientSecretSecret = defineSecret("GSP_CLIENT_SECRET");
 const tokenKeySecret = defineSecret("GSP_TOKEN_ENCRYPTION_KEY");
 const app = express();
-const SANDBOX_BASE_URL = (process.env.SANDBOX_BASE_URL || "https://api.sandbox.co.in").replace(/\/+$/, "");
-const SANDBOX_API_VERSION = process.env.SANDBOX_API_VERSION || "1.0.0";
-const GST_SOURCE = process.env.SANDBOX_GST_SOURCE || "primary";
-
+const BASE_URL = (process.env.GSP_BASE_URL || "https://apisandbox.whitebooks.in").replace(/\/+$/, "");
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb", strict: true }));
 
@@ -22,7 +19,6 @@ const allowedOrigins = (process.env.GST_ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-
 app.use((req, res, next) => {
   const origin = req.get("origin");
   if (origin && allowedOrigins.includes(origin)) {
@@ -52,126 +48,70 @@ async function requireFirebaseUser(req, res, next) {
     return res.status(error.status || 401).json({ success: false, error: error.status ? error.message : "Invalid or expired sign-in session." });
   }
 }
-
 app.use(requireFirebaseUser);
 
 function validateProfileId(value) {
-  if (!["main_1", "main_2"].includes(value)) {
-    throw httpError(400, "GST services are available only for a GST business profile.");
-  }
+  if (!["main_1", "main_2"].includes(value)) throw httpError(400, "GST services are only available for GST business profiles.");
   return value;
 }
-
 function validateGstin(value) {
   const gstin = String(value || "").trim().toUpperCase();
-  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) {
-    throw httpError(400, "Enter a valid 15-character GSTIN.");
-  }
+  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) throw httpError(400, "Enter a valid 15-character GSTIN.");
   return gstin;
 }
-
-function validateSandboxUrl() {
+function validateBaseUrl() {
   let parsed;
-  try {
-    parsed = new URL(SANDBOX_BASE_URL);
-  } catch {
-    throw httpError(503, "Sandbox API URL is not configured correctly.");
+  try { parsed = new URL(BASE_URL); } catch { throw httpError(503, "WhiteBooks API URL is invalid."); }
+  if (parsed.protocol !== "https:" || !["apisandbox.whitebooks.in", "api.whitebooks.in"].includes(parsed.hostname)) {
+    throw httpError(503, "GSP_BASE_URL must use the official WhiteBooks sandbox or production HTTPS host.");
   }
-  if (parsed.protocol !== "https:" || parsed.hostname !== "api.sandbox.co.in") {
-    throw httpError(503, "Sandbox API URL must be https://api.sandbox.co.in.");
-  }
-  return SANDBOX_BASE_URL;
+  return BASE_URL;
 }
-
-function sandboxHeaders(accessToken = "") {
-  const headers = {
-    accept: "application/json",
-    "x-api-key": sandboxApiKey.value(),
-    "x-api-version": SANDBOX_API_VERSION
-  };
-  if (accessToken) headers.authorization = accessToken;
-  return headers;
+function getIpAddress() {
+  const value = process.env.GSP_IP_ADDRESS;
+  if (!value) throw httpError(503, "Configure the provider-approved GSP_IP_ADDRESS on the server.");
+  return value;
 }
-
-function taxpayerHeaders(accessToken) {
+function makeGstHeaders(gstin, username, txn = "") {
   return {
-    ...sandboxHeaders(accessToken),
-    "Content-Type": "application/json",
-    "x-source": GST_SOURCE
+    gst_username: username,
+    state_cd: gstin.slice(0, 2),
+    ip_address: getIpAddress(),
+    client_id: clientIdSecret.value(),
+    client_secret: clientSecretSecret.value(),
+    ...(txn ? { txn } : {})
   };
 }
-
-function extractAccessToken(response) {
-  return response?.data?.data?.access_token || response?.data?.access_token || response?.data?.data?.accessToken || response?.data?.accessToken || "";
+function encryptionKey() {
+  const key = Buffer.from(tokenKeySecret.value(), "base64");
+  if (key.length !== 32) throw httpError(503, "GST session encryption key is not configured correctly.");
+  return key;
 }
-
-async function authenticateSandbox() {
+function encryptSession(payload) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
+  return { encryptedSession: ciphertext.toString("base64"), iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64") };
+}
+function decryptSession(record) {
   try {
-    const response = await axios.post(`${validateSandboxUrl()}/authenticate`, null, {
-      headers: {
-        accept: "application/json",
-        "x-api-key": sandboxApiKey.value(),
-        "x-api-secret": sandboxApiSecret.value(),
-        "x-api-version": SANDBOX_API_VERSION
-      },
-      timeout: 20_000,
-      maxRedirects: 0,
-      maxContentLength: 1_000_000
-    });
-    const token = extractAccessToken(response);
-    if (!token) throw httpError(502, "Sandbox authentication did not return an API access token.");
-    return token;
+    const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(record.iv, "base64"));
+    decipher.setAuthTag(Buffer.from(record.tag, "base64"));
+    const clear = Buffer.concat([decipher.update(Buffer.from(record.encryptedSession, "base64")), decipher.final()]).toString("utf8");
+    return JSON.parse(clear);
   } catch (error) {
     if (error.status) throw error;
-    const providerError = getProviderError(error);
-    throw httpError(providerError.status, providerError.message);
-  }
-}
-
-function encryptSession(payload) {
-  const key = Buffer.from(tokenKeySecret.value(), "base64");
-  if (key.length !== 32) throw httpError(503, "GST session encryption key is not configured correctly.");
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
-  return {
-    encryptedSession: ciphertext.toString("base64"),
-    iv: iv.toString("base64"),
-    tag: cipher.getAuthTag().toString("base64")
-  };
-}
-
-function decryptSession(record) {
-  const key = Buffer.from(tokenKeySecret.value(), "base64");
-  if (key.length !== 32) throw httpError(503, "GST session encryption key is not configured correctly.");
-  try {
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(record.iv, "base64"));
-    decipher.setAuthTag(Buffer.from(record.tag, "base64"));
-    const clear = Buffer.concat([
-      decipher.update(Buffer.from(record.encryptedSession, "base64")),
-      decipher.final()
-    ]).toString("utf8");
-    return JSON.parse(clear);
-  } catch {
     throw httpError(500, "Could not securely read the GST session. Please authenticate again.");
   }
 }
-
-function sessionRef(uid, profileId) {
-  return db.doc(`users/${uid}/gst_sessions/${profileId}`);
-}
-
-function getProviderError(error) {
+function sessionRef(uid, profileId) { return db.doc(`users/${uid}/gst_sessions/${profileId}`); }
+function pendingOtpRef(uid, profileId) { return db.doc(`users/${uid}/gst_pending_auth/${profileId}`); }
+function providerError(error) {
   const status = error.response?.status;
-  const providerData = error.response?.data;
-  const providerMessage = [providerData?.message, providerData?.error, providerData?.data?.message]
-    .find((message) => typeof message === "string");
-  return {
-    status: status && status >= 400 && status < 600 ? status : 502,
-    message: providerMessage ? providerMessage.slice(0, 300) : (error.code === "ECONNABORTED" ? "Sandbox request timed out." : "Sandbox request failed.")
-  };
+  const body = error.response?.data;
+  const message = [body?.message, body?.error, body?.error_description, body?.data?.message].find((item) => typeof item === "string");
+  return { status: status >= 400 && status < 600 ? status : 502, message: message ? message.slice(0, 300) : (error.code === "ECONNABORTED" ? "WhiteBooks request timed out." : "WhiteBooks request failed.") };
 }
-
 function asyncRoute(handler) {
   return (req, res) => Promise.resolve(handler(req, res)).catch((error) => {
     const status = error.status || 500;
@@ -179,20 +119,29 @@ function asyncRoute(handler) {
     res.status(status).json({ success: false, error: status === 500 ? "GST service encountered an error." : error.message });
   });
 }
-
-async function verifyProfileGstin(uid, profileId, gstin) {
+async function verifyProfile(uid, profileId, gstin) {
   const profile = await db.doc(`users/${uid}/business_profiles/${profileId}`).get();
-  if (!profile.exists || String(profile.get("gstin") || "").toUpperCase() !== gstin) {
-    throw httpError(403, "GSTIN must match the selected business profile in Finboss settings.");
+  if (!profile.exists || String(profile.get("gstin") || "").trim().toUpperCase() !== gstin) {
+    throw httpError(403, "GSTIN must match the selected Finboss business profile.");
   }
+}
+function pickTxn(body) {
+  const txn = body?.data?.txn || body?.txn || body?.data?.transaction_id || body?.transaction_id || body?.data?.transactionId;
+  return typeof txn === "string" && txn.length <= 200 ? txn : "";
+}
+function pickAccessToken(body) {
+  const token = body?.data?.auth_token || body?.auth_token || body?.data?.access_token || body?.access_token || body?.data?.authToken;
+  return typeof token === "string" ? token : "";
 }
 
 app.post("/api/gst/request-otp", asyncRoute(async (req, res) => {
   const profileId = validateProfileId(req.body.profileId);
   const gstin = validateGstin(req.body.gstin);
   const username = String(req.body.gstUsername || "").trim();
+  const email = String(req.body.email || "").trim();
   if (!username || username.length > 100) throw httpError(400, "Enter the GST portal username.");
-  await verifyProfileGstin(req.user.uid, profileId, gstin);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) throw httpError(400, "Enter a valid email address for WhiteBooks OTP requests.");
+  await verifyProfile(req.user.uid, profileId, gstin);
 
   const rateRef = db.doc(`users/${req.user.uid}/gst_rate_limits/${profileId}`);
   const now = Date.now();
@@ -201,27 +150,31 @@ app.post("/api/gst/request-otp", asyncRoute(async (req, res) => {
     const snapshot = await transaction.get(rateRef);
     const data = snapshot.exists ? snapshot.data() : {};
     const count = data.dayKey === dayKey ? Number(data.count || 0) : 0;
-    if (now - Number(data.lastOtpAtMs || 0) < 60_000) throw httpError(429, "Please wait one minute before requesting another OTP.");
-    if (count >= 10) throw httpError(429, "Daily OTP request limit reached. Try again tomorrow.");
+    if (now - Number(data.lastOtpAtMs || 0) < 60_000) throw httpError(429, "Wait one minute before requesting another OTP.");
+    if (count >= 10) throw httpError(429, "Daily OTP request limit reached.");
     transaction.set(rateRef, { dayKey, count: count + 1, lastOtpAtMs: now });
   });
 
   try {
-    const sandboxToken = await authenticateSandbox();
-    const response = await axios.post(`${validateSandboxUrl()}/gst/compliance/tax-payer/otp`, {
-      username,
-      gstin
-    }, {
-      headers: taxpayerHeaders(sandboxToken),
+    const response = await axios.get(`${validateBaseUrl()}/authentication/otprequest`, {
+      params: { email },
+      headers: makeGstHeaders(gstin, username),
       timeout: 20_000,
       maxRedirects: 0,
       maxContentLength: 1_000_000
     });
-    res.json({ success: true, message: "OTP request sent. Check the mobile number or email registered with the GST portal.", providerStatus: response.data?.data?.status_cd || response.data?.status || "received" });
+    const txn = pickTxn(response.data);
+    if (!txn) throw httpError(502, "WhiteBooks did not return the OTP transaction ID required to verify the code.");
+    await pendingOtpRef(req.user.uid, profileId).set({
+      ...encryptSession({ gstin, username, email, txn }),
+      expiresAtMs: Date.now() + 10 * 60 * 1000,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    res.json({ success: true, message: "OTP request sent. Check the email/mobile associated with the GST portal." });
   } catch (error) {
     if (error.status) throw error;
-    const providerError = getProviderError(error);
-    throw httpError(providerError.status, providerError.message);
+    const failure = providerError(error);
+    throw httpError(failure.status, failure.message);
   }
 }));
 
@@ -229,38 +182,39 @@ app.post("/api/gst/verify-otp", asyncRoute(async (req, res) => {
   const profileId = validateProfileId(req.body.profileId);
   const gstin = validateGstin(req.body.gstin);
   const username = String(req.body.gstUsername || "").trim();
+  const email = String(req.body.email || "").trim();
   const otp = String(req.body.otp || "").trim();
-  if (!username || username.length > 100 || !/^[0-9]{4,8}$/.test(otp)) {
-    throw httpError(400, "Enter the GST portal username and the OTP received from GST.");
-  }
-  await verifyProfileGstin(req.user.uid, profileId, gstin);
+  if (!username || !email || !/^\d{4,8}$/.test(otp)) throw httpError(400, "Enter email, GST username, and the OTP received.");
+  await verifyProfile(req.user.uid, profileId, gstin);
+
+  const pendingRef = pendingOtpRef(req.user.uid, profileId);
+  const pendingDoc = await pendingRef.get();
+  if (!pendingDoc.exists || Number(pendingDoc.get("expiresAtMs") || 0) <= Date.now()) throw httpError(401, "OTP request expired. Request a new OTP.");
+  const pending = decryptSession(pendingDoc.data());
+  if (pending.gstin !== gstin || pending.username !== username || pending.email.toLowerCase() !== email.toLowerCase()) throw httpError(403, "OTP details do not match the request. Request a new OTP.");
 
   try {
-    const sandboxToken = await authenticateSandbox();
-    const response = await axios.post(`${validateSandboxUrl()}/gst/compliance/tax-payer/otp/verify`, {
-      username,
-      gstin
-    }, {
-      params: { otp },
-      headers: taxpayerHeaders(sandboxToken),
+    const response = await axios.get(`${validateBaseUrl()}/authentication/authtoken`, {
+      params: { email, otp },
+      headers: makeGstHeaders(gstin, username, pending.txn),
       timeout: 20_000,
       maxRedirects: 0,
       maxContentLength: 1_000_000
     });
-    const taxpayerToken = extractAccessToken(response);
-    if (!taxpayerToken) throw httpError(502, "Sandbox OTP verification did not return a taxpayer access token.");
-
+    const authToken = pickAccessToken(response.data);
+    if (!authToken) throw httpError(502, "WhiteBooks did not return an access token.");
     const expiresAtMs = Date.now() + 6 * 60 * 60 * 1000;
     await sessionRef(req.user.uid, profileId).set({
-      ...encryptSession({ gstin, username, taxpayerToken }),
+      ...encryptSession({ gstin, username, email, authToken }),
       expiresAtMs,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
+    await pendingRef.delete();
     res.json({ success: true, expiresAt: new Date(expiresAtMs).toISOString() });
   } catch (error) {
     if (error.status) throw error;
-    const providerError = getProviderError(error);
-    throw httpError(providerError.status, providerError.message);
+    const failure = providerError(error);
+    throw httpError(failure.status, failure.message);
   }
 }));
 
@@ -268,22 +222,23 @@ app.post("/api/gst/upload-gstr1", asyncRoute(async (req, res) => {
   const profileId = validateProfileId(req.body.profileId);
   const returnPeriod = String(req.body.returnPeriod || "").trim();
   const returnData = req.body.returnData;
-  if (!/^(0[1-9]|1[0-2])[0-9]{4}$/.test(returnPeriod)) throw httpError(400, "Return period must use MMYYYY format.");
-  if (!returnData || typeof returnData !== "object" || Array.isArray(returnData)) {
-    throw httpError(400, "Provide a GSTR-1 return object using Sandbox's documented GSTN schema.");
-  }
-  const [month, year] = [returnPeriod.slice(0, 2), returnPeriod.slice(2)];
+  if (!/^(0[1-9]|1[0-2])\d{4}$/.test(returnPeriod)) throw httpError(400, "Return period must use MMYYYY format.");
+  if (!returnData || typeof returnData !== "object" || Array.isArray(returnData)) throw httpError(400, "Provide a GSTR-1 JSON object using the WhiteBooks schema.");
   const stored = await sessionRef(req.user.uid, profileId).get();
-  if (!stored.exists || Number(stored.get("expiresAtMs") || 0) <= Date.now()) {
-    throw httpError(401, "GST session is missing or expired. Request and verify a new OTP.");
-  }
+  if (!stored.exists || Number(stored.get("expiresAtMs") || 0) <= Date.now()) throw httpError(401, "GST session missing or expired. Request and verify a new OTP.");
   const session = decryptSession(stored.data());
-  await verifyProfileGstin(req.user.uid, profileId, session.gstin);
+  await verifyProfile(req.user.uid, profileId, session.gstin);
+  const payload = { ...returnData, gstin: session.gstin, fp: returnPeriod };
 
   try {
-    const payload = { ...returnData, gstin: session.gstin, fp: returnPeriod };
-    const response = await axios.post(`${validateSandboxUrl()}/gst/compliance/tax-payer/gstrs/gstr-1/${year}/${month}`, payload, {
-      headers: taxpayerHeaders(session.taxpayerToken),
+    const response = await axios.put(`${validateBaseUrl()}/gstr1/retsave`, payload, {
+      params: { email: session.email },
+      headers: {
+        ...makeGstHeaders(session.gstin, session.username),
+        ret_period: returnPeriod,
+        "auth-token": session.authToken,
+        "Content-Type": "application/json"
+      },
       timeout: 30_000,
       maxRedirects: 0,
       maxContentLength: 1_000_000
@@ -291,18 +246,18 @@ app.post("/api/gst/upload-gstr1", asyncRoute(async (req, res) => {
     res.json({
       success: true,
       referenceId: response.data?.data?.reference_id || response.data?.reference_id || response.data?.data?.referenceId || response.data?.referenceId || null,
-      providerStatus: response.data?.data?.status_cd || response.data?.status || "received"
+      providerStatus: response.data?.data?.status || response.data?.status || "received"
     });
   } catch (error) {
     if (error.status) throw error;
-    const providerError = getProviderError(error);
-    throw httpError(providerError.status, providerError.message);
+    const failure = providerError(error);
+    throw httpError(failure.status, failure.message);
   }
 }));
 
 app.post("/api/gst/logout", asyncRoute(async (req, res) => {
   const profileId = validateProfileId(req.body.profileId);
-  await sessionRef(req.user.uid, profileId).delete();
+  await Promise.all([sessionRef(req.user.uid, profileId).delete(), pendingOtpRef(req.user.uid, profileId).delete()]);
   res.json({ success: true });
 }));
 
@@ -316,5 +271,5 @@ exports.gstApi = onRequest({
   region: "asia-south1",
   timeoutSeconds: 60,
   memory: "256MiB",
-  secrets: [sandboxApiKey, sandboxApiSecret, tokenKeySecret]
+  secrets: [clientIdSecret, clientSecretSecret, tokenKeySecret]
 }, app);
