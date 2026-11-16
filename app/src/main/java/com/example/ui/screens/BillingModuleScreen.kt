@@ -90,6 +90,7 @@ import com.example.ui.theme.MonoMetricMedium
 import com.example.ui.viewmodel.UiState
 import com.example.util.InvoicePdfPrinter
 import com.example.util.InvoicePrintOptions
+import com.example.util.WhatsAppShareHelper
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -360,14 +361,17 @@ fun BillingModuleContent(
                     "Create your first GST tax invoice or POS bill with automatic stock deduction and Khata sync."
                 } else "Try adjusting your search or payment status filter.",
               actionLabel =
-                if (canCreateInvoices) {
-                  if (isPlainNonGst) "New Plain Bill" else "New GST Bill"
-                } else null,
+                if (canCreateInvoices) "Create Invoice" else null,
               onAction = if (canCreateInvoices) onOpenNewInvoiceDialog else null,
             )
           }
         } else {
           items(filteredInvoices, key = { it.id }) { invoice ->
+            val buyerPhone =
+              parties.firstOrNull {
+                (invoice.partyId.isNotBlank() && it.id == invoice.partyId) ||
+                  it.name.equals(invoice.partyName, ignoreCase = true)
+              }?.phone
             InvoiceListCard(
               invoice = invoice,
               currency = currency,
@@ -377,6 +381,21 @@ fun BillingModuleContent(
               onClick = { selectedInvoice = invoice },
               onPrint = { triggerPrintInvoice(invoice) },
               onDownloadPdf = { triggerDownloadPdf(invoice) },
+              onShareWhatsApp = {
+                val msg =
+                  WhatsAppShareHelper.formatInvoiceSummary(
+                    invoice = invoice,
+                    profile = profile,
+                    currency = currency,
+                    isPlainNonGst = isPlainNonGst,
+                  )
+                WhatsAppShareHelper.shareTextToWhatsApp(
+                  context = context,
+                  text = msg,
+                  rawPhoneNumber = buyerPhone,
+                  chooserTitle = "Share Invoice on WhatsApp",
+                )
+              },
               onEdit = { editingInvoice = invoice },
               onDelete = { invoicePendingDelete = invoice },
               onOpenEInvoice = { openEInvoiceFor(invoice) },
@@ -462,9 +481,16 @@ fun BillingModuleContent(
   val liveSelected =
     selectedInvoice?.let { current -> invoices.firstOrNull { it.id == current.id } }
   if (liveSelected != null) {
+    val liveBuyerPhone =
+      parties.firstOrNull {
+        (liveSelected.partyId.isNotBlank() && it.id == liveSelected.partyId) ||
+          it.name.equals(liveSelected.partyName, ignoreCase = true)
+      }?.phone
     InvoiceDetailSheet(
       invoice = liveSelected,
       profile = profile,
+      appSettings = appSettings,
+      buyerPhone = liveBuyerPhone,
       currency = currency,
       isPlainNonGst = isPlainNonGst,
       canPrint = canPrintInvoices,
@@ -577,6 +603,7 @@ fun BillingModuleContent(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InvoiceListCard(
   invoice: GstInvoice,
@@ -587,6 +614,7 @@ private fun InvoiceListCard(
   onClick: () -> Unit,
   onPrint: () -> Unit,
   onDownloadPdf: () -> Unit,
+  onShareWhatsApp: () -> Unit = {},
   onEdit: () -> Unit,
   onDelete: () -> Unit,
   onOpenEInvoice: () -> Unit = {},
@@ -738,71 +766,82 @@ private fun InvoiceListCard(
         }
       }
 
-      if (canPrint || canEditDelete) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          if (canPrint) {
-            TextButton(
-              onClick = onPrint,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_print_${invoice.invoiceNumber}"),
-            ) {
-              Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Print")
-            }
-            TextButton(
-              onClick = onDownloadPdf,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_pdf_${invoice.invoiceNumber}"),
-            ) {
-              Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("PDF")
-            }
+      FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.Center,
+      ) {
+        if (canPrint) {
+          TextButton(
+            onClick = onPrint,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_print_${invoice.invoiceNumber}"),
+          ) {
+            Icon(Icons.Filled.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Print")
           }
-          if (!isPlainNonGst && invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
-            TextButton(
-              onClick = onOpenEInvoice,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_einvoice_${invoice.invoiceNumber}"),
-            ) {
-              Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(if (invoice.hasEInvoice) "IRN ✓" else "E-Invoice")
-            }
-            TextButton(
-              onClick = onOpenEWayBill,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_ewaybill_${invoice.invoiceNumber}"),
-            ) {
-              Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(if (invoice.hasEWayBill) "EWB ✓" else "E-Way Bill")
-            }
-          } else if (canEditDelete) {
-            TextButton(
-              onClick = onEdit,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_edit_${invoice.invoiceNumber}"),
-            ) {
-              Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Edit")
-            }
-            TextButton(
-              onClick = onDelete,
-              modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_delete_${invoice.invoiceNumber}"),
-            ) {
-              Icon(
-                Icons.Filled.DeleteOutline,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(16.dp),
-              )
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Delete", color = MaterialTheme.colorScheme.error)
-            }
+          TextButton(
+            onClick = onDownloadPdf,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_pdf_${invoice.invoiceNumber}"),
+          ) {
+            Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("PDF")
+          }
+        }
+        TextButton(
+          onClick = onShareWhatsApp,
+          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_whatsapp_${invoice.invoiceNumber}"),
+        ) {
+          Icon(
+            Icons.Filled.Share,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("WhatsApp", color = MaterialTheme.colorScheme.secondary)
+        }
+        if (!isPlainNonGst && invoice.taxMode != GstInvoice.TAX_MODE_NONE) {
+          TextButton(
+            onClick = onOpenEInvoice,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_einvoice_${invoice.invoiceNumber}"),
+          ) {
+            Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(if (invoice.hasEInvoice) "IRN ✓" else "E-Invoice")
+          }
+          TextButton(
+            onClick = onOpenEWayBill,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_ewaybill_${invoice.invoiceNumber}"),
+          ) {
+            Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(if (invoice.hasEWayBill) "EWB ✓" else "E-Way Bill")
+          }
+        } else if (canEditDelete) {
+          TextButton(
+            onClick = onEdit,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_edit_${invoice.invoiceNumber}"),
+          ) {
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Edit")
+          }
+          TextButton(
+            onClick = onDelete,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_card_delete_${invoice.invoiceNumber}"),
+          ) {
+            Icon(
+              Icons.Filled.DeleteOutline,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.error,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Delete", color = MaterialTheme.colorScheme.error)
           }
         }
       }
@@ -1398,6 +1437,8 @@ internal fun NewInvoiceDialog(
 private fun InvoiceDetailSheet(
   invoice: GstInvoice,
   profile: BusinessProfile?,
+  appSettings: ErpAppSettings = ErpAppSettings(),
+  buyerPhone: String? = null,
   currency: String,
   isPlainNonGst: Boolean = false,
   canPrint: Boolean = true,
@@ -1506,7 +1547,54 @@ private fun InvoiceDetailSheet(
             Text("Edit")
           }
         }
+        OutlinedButton(
+          onClick = {
+            val summaryText =
+              WhatsAppShareHelper.formatInvoiceSummary(invoice, profile, currency, isPlainNonGst)
+            WhatsAppShareHelper.shareTextToWhatsApp(
+              context = context,
+              text = summaryText,
+              rawPhoneNumber = buyerPhone,
+              chooserTitle = "Share Invoice on WhatsApp",
+            )
+          },
+          modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_whatsapp_text_button"),
+        ) {
+          Icon(
+            Icons.Filled.Share,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(17.dp),
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("WhatsApp", color = MaterialTheme.colorScheme.secondary)
+        }
         if (canPrint) {
+          OutlinedButton(
+            onClick = {
+              val summaryText =
+                WhatsAppShareHelper.formatInvoiceSummary(invoice, profile, currency, isPlainNonGst)
+              WhatsAppShareHelper.shareInvoicePdfToWhatsApp(
+                context = context,
+                invoice = invoice,
+                profile = profile,
+                currency = currency,
+                appSettings = appSettings,
+                isPlainNonGst = isPlainNonGst,
+                captionText = summaryText,
+              )
+            },
+            modifier = Modifier.heightIn(min = 48.dp).testTag("invoice_detail_whatsapp_pdf_button"),
+          ) {
+            Icon(
+              Icons.Filled.PictureAsPdf,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.secondary,
+              modifier = Modifier.size(17.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("WhatsApp PDF", color = MaterialTheme.colorScheme.secondary)
+          }
           OutlinedButton(
             onClick = {
               val summaryText = buildShareableReceipt(invoice, profile, currency, isPlainNonGst)

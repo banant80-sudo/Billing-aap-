@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -64,6 +66,7 @@ import com.example.data.model.ErpParty
 import com.example.data.reference.IndiaStates
 import com.example.ui.theme.MonoMetricMedium
 import com.example.ui.viewmodel.UiState
+import com.example.util.WhatsAppShareHelper
 
 @Composable
 fun PartiesModuleContent(
@@ -91,7 +94,9 @@ fun PartiesModuleContent(
   onDismissAddPartyDialog: () -> Unit,
   onOpenAddPartyDialog: () -> Unit,
   canManageParties: Boolean = true,
+  businessName: String = "Finboss Billing No.1 ERP",
 ) {
+  val context = LocalContext.current
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var typeFilter by rememberSaveable { mutableStateOf("all") }
   var editingParty by remember { mutableStateOf<ErpParty?>(null) }
@@ -213,6 +218,20 @@ fun PartiesModuleContent(
               party = party,
               currency = currency,
               canManageParties = canManageParties,
+              onShareWhatsApp = {
+                val msg =
+                  WhatsAppShareHelper.formatPartyStatementSummary(
+                    party = party,
+                    businessName = businessName,
+                    currency = currency,
+                  )
+                WhatsAppShareHelper.shareTextToWhatsApp(
+                  context = context,
+                  text = msg,
+                  rawPhoneNumber = party.phone,
+                  chooserTitle = "Share Khata Statement on WhatsApp",
+                )
+              },
               onRecordPayment = { paymentParty = party },
               onEdit = { editingParty = party },
               onDelete = { onDeleteParty(party.id) },
@@ -273,6 +292,7 @@ private fun PartyLedgerCard(
   party: ErpParty,
   currency: String,
   canManageParties: Boolean = true,
+  onShareWhatsApp: () -> Unit,
   onRecordPayment: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
@@ -376,8 +396,19 @@ private fun PartyLedgerCard(
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (canManageParties) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          IconButton(
+            onClick = onShareWhatsApp,
+            modifier = Modifier.size(48.dp).testTag("party_card_whatsapp_${party.id}"),
+          ) {
+            Icon(
+              imageVector = Icons.Filled.Share,
+              contentDescription = "Share Khata on WhatsApp",
+              tint = MaterialTheme.colorScheme.secondary,
+              modifier = Modifier.size(18.dp),
+            )
+          }
+          if (canManageParties) {
             if (balance > 0.0) {
               TextButton(onClick = onRecordPayment) {
                 Icon(Icons.Filled.Payments, contentDescription = null, modifier = Modifier.size(16.dp))

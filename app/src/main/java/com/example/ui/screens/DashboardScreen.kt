@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.Assessment
@@ -71,6 +72,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -137,6 +140,7 @@ import com.example.ui.viewmodel.DashboardViewModel
 import com.example.ui.viewmodel.UiState
 import com.example.ui.viewmodel.WorkspaceSyncState
 import com.example.util.InvoicePdfPrinter
+import com.example.util.WhatsAppShareHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -223,6 +227,7 @@ fun DashboardScreen(
   var editingProfileSlot by remember { mutableStateOf<Pair<String, BusinessProfile?>?>(null) }
   var showAddEntryDialog by remember { mutableStateOf(false) }
   var showNewInvoiceDialog by remember { mutableStateOf(false) }
+  var showReceivePaymentDialog by remember { mutableStateOf(false) }
   var showAddInventoryDialog by remember { mutableStateOf(false) }
   var showAddPartyDialog by remember { mutableStateOf(false) }
   var showAddExpenseDialog by remember { mutableStateOf(false) }
@@ -505,23 +510,81 @@ fun DashboardScreen(
         },
         floatingActionButton = {
           when (selectedTab) {
-            DashboardTab.OVERVIEW ->
-              if (effectivePermissions.canCreateInvoices) {
-                ExtendedFloatingActionButton(
-                  onClick = { showNewInvoiceDialog = true },
-                  icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                  text = { Text(if (isPlainNonGst) "New Plain Bill" else "New GST Bill") },
-                  containerColor = MaterialTheme.colorScheme.secondary,
-                  contentColor = MaterialTheme.colorScheme.onSecondary,
-                  modifier = Modifier.testTag("overview_new_bill_fab"),
-                )
+            DashboardTab.OVERVIEW -> {
+              val canCreate = effectivePermissions.canCreateInvoices
+              val canReceivePayment =
+                effectivePermissions.canCreateInvoices ||
+                  effectivePermissions.canEditDeleteInvoices ||
+                  effectivePermissions.canManageParties
+              if (canCreate || canReceivePayment) {
+                Row(
+                  modifier = Modifier.padding(start = 16.dp),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  if (canReceivePayment) {
+                    FloatingActionButton(
+                      onClick = { showReceivePaymentDialog = true },
+                      shape = FloatingActionButtonDefaults.extendedFabShape,
+                      containerColor = MaterialTheme.colorScheme.primaryContainer,
+                      contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                      modifier = Modifier.heightIn(min = 52.dp).testTag("overview_receive_payment_fab"),
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Filled.Payments,
+                          contentDescription = null,
+                          modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                          text = "Receive Payment",
+                          style = MaterialTheme.typography.labelLarge,
+                          fontWeight = FontWeight.SemiBold,
+                          maxLines = 1,
+                        )
+                      }
+                    }
+                  }
+                  if (canCreate) {
+                    FloatingActionButton(
+                      onClick = { showNewInvoiceDialog = true },
+                      shape = FloatingActionButtonDefaults.extendedFabShape,
+                      containerColor = MaterialTheme.colorScheme.secondary,
+                      contentColor = MaterialTheme.colorScheme.onSecondary,
+                      modifier = Modifier.heightIn(min = 52.dp).testTag("overview_new_bill_fab"),
+                    ) {
+                      Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Filled.Add,
+                          contentDescription = null,
+                          modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                          text = "Create Invoice",
+                          style = MaterialTheme.typography.labelLarge,
+                          fontWeight = FontWeight.SemiBold,
+                          maxLines = 1,
+                        )
+                      }
+                    }
+                  }
+                }
               }
+            }
             DashboardTab.BILLING ->
               if (effectivePermissions.canCreateInvoices) {
                 ExtendedFloatingActionButton(
                   onClick = { showNewInvoiceDialog = true },
                   icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                  text = { Text(if (isPlainNonGst) "New Plain Bill" else "New Bill") },
+                  text = { Text("Create Invoice") },
                   containerColor = MaterialTheme.colorScheme.secondary,
                   contentColor = MaterialTheme.colorScheme.onSecondary,
                   modifier = Modifier.testTag("new_invoice_fab"),
@@ -641,6 +704,21 @@ fun DashboardScreen(
                   },
                   onMarkPaid = { if (effectivePermissions.canAddQuickEntry) viewModel.markEntryPaid(it) },
                   onDeleteEntry = { if (effectivePermissions.canAddQuickEntry) viewModel.deleteDashboardEntry(it) },
+                  onShareOverviewWhatsApp = {
+                    val biz = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise"
+                    val summary =
+                      WhatsAppShareHelper.formatDashboardOverviewSummary(
+                        businessName = biz,
+                        isPlainNonGst = isPlainNonGst,
+                        kpi = kpiSummary,
+                        currency = currency,
+                      )
+                    WhatsAppShareHelper.shareTextToWhatsApp(
+                      context = context,
+                      text = summary,
+                      chooserTitle = "Share Business Overview on WhatsApp",
+                    )
+                  },
                   onRetryWorkspace = { viewModel.initializeWorkspace() },
                 )
               DashboardTab.BILLING ->
@@ -706,6 +784,7 @@ fun DashboardScreen(
                   onDismissAddItemDialog = { showAddInventoryDialog = false },
                   onOpenAddItemDialog = { if (effectivePermissions.canManageStock) showAddInventoryDialog = true },
                   canManageStock = effectivePermissions.canManageStock,
+                  businessName = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise",
                 )
               DashboardTab.PARTIES ->
                 PartiesModuleContent(
@@ -724,6 +803,7 @@ fun DashboardScreen(
                   onDismissAddPartyDialog = { showAddPartyDialog = false },
                   onOpenAddPartyDialog = { if (effectivePermissions.canManageParties) showAddPartyDialog = true },
                   canManageParties = effectivePermissions.canManageParties,
+                  businessName = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise",
                 )
               DashboardTab.EXPENSES ->
                 ExpensesModuleContent(
@@ -745,6 +825,7 @@ fun DashboardScreen(
                   onDismissAddExpenseDialog = { showAddExpenseDialog = false },
                   onOpenAddExpenseDialog = { if (effectivePermissions.canManageExpenses) showAddExpenseDialog = true },
                   canManageExpenses = effectivePermissions.canManageExpenses,
+                  businessName = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise",
                 )
               DashboardTab.REPORTS ->
                 ReportsModuleContent(
@@ -811,6 +892,23 @@ fun DashboardScreen(
         }
       }
     }
+  }
+
+  if (showReceivePaymentDialog) {
+    ReceivePaymentDashboardDialog(
+      invoices = invoices,
+      parties = parties,
+      businessName = profile?.businessName?.ifBlank { null } ?: "$userDisplayName Enterprise",
+      currency = currency,
+      isBusy = isBusy,
+      onDismiss = { showReceivePaymentDialog = false },
+      onRecordInvoicePayment = { inv, amt, method, onDone ->
+        viewModel.recordInvoicePayment(inv, amt, method, onDone)
+      },
+      onRecordPartyPayment = { party, amt, onDone ->
+        viewModel.recordPartyPayment(party, amt, onDone)
+      },
+    )
   }
 
   // Allow creating an invoice from Overview FAB even while selectedTab == OVERVIEW
@@ -1023,13 +1121,18 @@ fun DashboardScreen(
   }
 
   if (showSubscriptionSheet) {
+    val activeBizName =
+      (profileState as? UiState.Success)?.data?.businessName?.ifBlank { null }
+        ?: "$userDisplayName Enterprise"
     SubscriptionPlansSheet(
       status = subscriptionStatus,
       isOwnerSession = !isSalesmanSession,
-      onActivatePlan = { tier, cycle ->
-        viewModel.activateSubscriptionPlan(tier, cycle) {
-          showSubscriptionSheet = false
-        }
+      appSettings = appSettings,
+      userEmail = userEmail,
+      businessName = activeBizName,
+      isBusy = isBusy,
+      onActivatePlan = { tier, cycle, onSuccess ->
+        viewModel.activateSubscriptionPlan(tier, cycle, onSuccess)
       },
       onDismiss = { showSubscriptionSheet = false },
     )
@@ -1075,6 +1178,7 @@ private fun OverviewTabContent(
   onNavigateTab: (DashboardTab) -> Unit,
   onMarkPaid: (String) -> Unit,
   onDeleteEntry: (String) -> Unit,
+  onShareOverviewWhatsApp: () -> Unit = {},
   onRetryWorkspace: () -> Unit,
 ) {
   val profile = (profileState as? UiState.Success)?.data
@@ -1154,6 +1258,22 @@ private fun OverviewTabContent(
         onOpenProfilesSheet = onOpenProfilesSheet,
         onEditProfile = onEditProfile,
       )
+    }
+
+    item {
+      OutlinedButton(
+        onClick = onShareOverviewWhatsApp,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("overview_whatsapp_share_button"),
+      ) {
+        Icon(
+          imageVector = Icons.Filled.Share,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.secondary,
+          modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Share Business Summary on WhatsApp", color = MaterialTheme.colorScheme.secondary)
+      }
     }
 
     if (profileState is UiState.Error) {

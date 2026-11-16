@@ -25,10 +25,13 @@ import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,14 +53,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BusinessProfile
 import com.example.data.model.DashboardEntry
 import com.example.data.model.ErpModuleConfig
+import com.example.data.model.ErpParty
+import com.example.data.model.GstInvoice
 import com.example.data.reference.IndiaStates
+import com.example.util.WhatsAppShareHelper
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -910,3 +918,401 @@ private fun moduleBlueprintFeatures(code: String): List<String> =
         "Exportable audit-ready ledger summaries",
       )
   }
+
+private data class RecordedPaymentReceipt(
+  val payerName: String,
+  val payerPhone: String?,
+  val message: String,
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ReceivePaymentDashboardDialog(
+  invoices: List<GstInvoice>,
+  parties: List<ErpParty>,
+  businessName: String,
+  currency: String,
+  isBusy: Boolean,
+  onDismiss: () -> Unit,
+  onRecordInvoicePayment: (invoice: GstInvoice, amount: Double, method: String, onDone: () -> Unit) -> Unit,
+  onRecordPartyPayment: (party: ErpParty, amount: Double, onDone: () -> Unit) -> Unit,
+) {
+  val context = LocalContext.current
+  val pendingInvoices = remember(invoices) {
+    invoices.filter { it.status != GstInvoice.STATUS_PAID && it.balanceDue > 0.0 }
+  }
+  val customersWithDues = remember(parties) {
+    val withDues = parties.filter { it.partyType == ErpParty.TYPE_CUSTOMER && it.outstandingBalance > 0.0 }
+    if (withDues.isNotEmpty()) withDues else parties.filter { it.partyType == ErpParty.TYPE_CUSTOMER }
+  }
+
+  var mode by remember(pendingInvoices.size, customersWithDues.size) {
+    mutableStateOf(if (pendingInvoices.isNotEmpty() || customersWithDues.isEmpty()) "invoice" else "party")
+  }
+  var selectedInvoiceId by remember(pendingInvoices) {
+    mutableStateOf(pendingInvoices.firstOrNull()?.id.orEmpty())
+  }
+  var selectedPartyId by remember(customersWithDues) {
+    mutableStateOf(customersWithDues.firstOrNull()?.id.orEmpty())
+  }
+
+  val selectedInvoice = pendingInvoices.firstOrNull { it.id == selectedInvoiceId } ?: pendingInvoices.firstOrNull()
+  val selectedParty = customersWithDues.firstOrNull { it.id == selectedPartyId } ?: customersWithDues.firstOrNull()
+
+  var amountText by remember(mode, selectedInvoice?.id, selectedParty?.id) {
+    val defaultAmt =
+      if (mode == "invoice") selectedInvoice?.balanceDue ?: 0.0
+      else selectedParty?.outstandingBalance ?: 0.0
+    mutableStateOf(if (defaultAmt > 0.0) defaultAmt.toLong().toString() else "")
+  }
+  var payMethod by remember { mutableStateOf(GstInvoice.PAYMENT_UPI) }
+  var validationError by remember { mutableStateOf<String?>(null) }
+  var recordedReceipt by remember { mutableStateOf<RecordedPaymentReceipt?>(null) }
+
+  AlertDialog(
+    onDismissRequest = { if (!isBusy) onDismiss() },
+    icon = {
+      Icon(
+        imageVector = if (recordedReceipt != null) Icons.Filled.CheckCircle else Icons.Filled.Payments,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.secondary,
+      )
+    },
+    title = {
+      Text(
+        text = if (recordedReceipt != null) "Payment Received" else "Receive Payment",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+      )
+    },
+    text = {
+      val receipt = recordedReceipt
+      if (receipt != null) {
+        Column(
+          modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Text(
+              text = receipt.message,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSecondaryContainer,
+              modifier = Modifier.padding(12.dp),
+            )
+          }
+          Button(
+            onClick = {
+              WhatsAppShareHelper.shareTextToWhatsApp(
+                context = context,
+                text = receipt.message,
+                rawPhoneNumber = receipt.payerPhone,
+                chooserTitle = "Share Payment Receipt on WhatsApp",
+              )
+            },
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+              ),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("receive_payment_share_whatsapp_button"),
+          ) {
+            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Share Receipt on WhatsApp")
+          }
+        }
+      } else {
+        Column(
+          modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+              selected = mode == "invoice",
+              onClick = {
+                mode = "invoice"
+                validationError = null
+              },
+              label = { Text("Pending Bills (${pendingInvoices.size})") },
+              modifier = Modifier.testTag("receive_mode_invoice_chip"),
+            )
+            FilterChip(
+              selected = mode == "party",
+              onClick = {
+                mode = "party"
+                validationError = null
+              },
+              label = { Text("Customer Khata (${customersWithDues.size})") },
+              modifier = Modifier.testTag("receive_mode_party_chip"),
+            )
+          }
+
+          if (mode == "invoice") {
+            if (pendingInvoices.isEmpty()) {
+              Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Text(
+                  text = "All bills are currently paid! Switch to Customer Khata to record an account payment.",
+                  style = MaterialTheme.typography.bodySmall,
+                  modifier = Modifier.padding(12.dp),
+                )
+              }
+            } else {
+              Text(
+                text = "Select Invoice to Collect",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                pendingInvoices.take(8).forEach { inv ->
+                  val isSel = selectedInvoice?.id == inv.id
+                  Surface(
+                    color =
+                      if (isSel) MaterialTheme.colorScheme.primaryContainer
+                      else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    shape = MaterialTheme.shapes.small,
+                    border =
+                      if (isSel) BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                      else null,
+                    modifier =
+                      Modifier.fillMaxWidth()
+                        .clickable {
+                          selectedInvoiceId = inv.id
+                          validationError = null
+                        }
+                        .testTag("receive_invoice_option_${inv.invoiceNumber}"),
+                  ) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                          text = "${inv.invoiceNumber} • ${inv.partyName}",
+                          style = MaterialTheme.typography.labelLarge,
+                          fontWeight = FontWeight.SemiBold,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                          text = "Total ${formatErpMoney(currency, inv.grandTotal)}",
+                          style = MaterialTheme.typography.bodySmall,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                      }
+                      Text(
+                        text = "Due ${formatErpMoney(currency, inv.balanceDue)}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        fontWeight = FontWeight.Bold,
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            if (customersWithDues.isEmpty()) {
+              Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Text(
+                  text = "No customer parties added yet. Add a customer in Parties & Khata first.",
+                  style = MaterialTheme.typography.bodySmall,
+                  modifier = Modifier.padding(12.dp),
+                )
+              }
+            } else {
+              Text(
+                text = "Select Customer Khata",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                customersWithDues.take(8).forEach { party ->
+                  val isSel = selectedParty?.id == party.id
+                  Surface(
+                    color =
+                      if (isSel) MaterialTheme.colorScheme.primaryContainer
+                      else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    shape = MaterialTheme.shapes.small,
+                    border =
+                      if (isSel) BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                      else null,
+                    modifier =
+                      Modifier.fillMaxWidth()
+                        .clickable {
+                          selectedPartyId = party.id
+                          validationError = null
+                        }
+                        .testTag("receive_party_option_${party.id}"),
+                  ) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                          text = party.name,
+                          style = MaterialTheme.typography.labelLarge,
+                          fontWeight = FontWeight.SemiBold,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                        if (party.phone.isNotBlank()) {
+                          Text(
+                            text = party.phone,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                          )
+                        }
+                      }
+                      Text(
+                        text =
+                          if (party.outstandingBalance > 0.0) "Due ${formatErpMoney(currency, party.outstandingBalance)}"
+                          else "Settled",
+                        style = MaterialTheme.typography.labelLarge,
+                        color =
+                          if (party.outstandingBalance > 0.0) MaterialTheme.colorScheme.tertiary
+                          else MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Bold,
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          OutlinedTextField(
+            value = amountText,
+            onValueChange = { amountText = it.filter { ch -> ch.isDigit() || ch == '.' } },
+            label = { Text("Amount Received ($currency)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("receive_payment_amount_input"),
+          )
+
+          if (mode == "invoice") {
+            Text(
+              text = "Payment Mode",
+              style = MaterialTheme.typography.labelLarge,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              listOf(
+                GstInvoice.PAYMENT_UPI to "UPI",
+                GstInvoice.PAYMENT_CASH to "Cash",
+                GstInvoice.PAYMENT_CARD to "Card",
+              ).forEach { (key, label) ->
+                FilterChip(
+                  selected = payMethod == key,
+                  onClick = { payMethod = key },
+                  label = { Text(label) },
+                  modifier = Modifier.testTag("receive_method_chip_$key"),
+                )
+              }
+            }
+          }
+
+          if (validationError != null) {
+            Text(
+              text = validationError.orEmpty(),
+              color = MaterialTheme.colorScheme.error,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      if (recordedReceipt != null) {
+        Button(
+          onClick = onDismiss,
+          modifier = Modifier.testTag("receive_payment_done_button"),
+        ) {
+          Text("Done")
+        }
+      } else {
+        Button(
+          onClick = {
+            val parsedAmt = amountText.toDoubleOrNull() ?: 0.0
+            if (parsedAmt <= 0.0) {
+              validationError = "Enter a valid received amount greater than zero"
+              return@Button
+            }
+            if (mode == "invoice") {
+              val inv = selectedInvoice
+              if (inv == null) {
+                validationError = "No pending invoice selected"
+                return@Button
+              }
+              validationError = null
+              val targetPhone = parties.firstOrNull {
+                (inv.partyId.isNotBlank() && it.id == inv.partyId) ||
+                  it.name.equals(inv.partyName, ignoreCase = true)
+              }?.phone
+              onRecordInvoicePayment(inv, parsedAmt, payMethod) {
+                val remaining = (inv.balanceDue - parsedAmt).coerceAtLeast(0.0)
+                val msg =
+                  WhatsAppShareHelper.formatPaymentReceiptMessage(
+                    payerName = inv.partyName,
+                    referenceLabel = "Invoice ${inv.invoiceNumber}",
+                    amountPaid = parsedAmt,
+                    remainingDue = remaining,
+                    paymentMethod = payMethod,
+                    businessName = businessName,
+                    currency = currency,
+                  )
+                recordedReceipt = RecordedPaymentReceipt(inv.partyName, targetPhone, msg)
+              }
+            } else {
+              val pty = selectedParty
+              if (pty == null) {
+                validationError = "No customer selected"
+                return@Button
+              }
+              validationError = null
+              onRecordPartyPayment(pty, parsedAmt) {
+                val remaining = (pty.outstandingBalance - parsedAmt).coerceAtLeast(0.0)
+                val msg =
+                  WhatsAppShareHelper.formatPaymentReceiptMessage(
+                    payerName = pty.name,
+                    referenceLabel = "Customer Khata Payment",
+                    amountPaid = parsedAmt,
+                    remainingDue = remaining,
+                    paymentMethod = "KHATA",
+                    businessName = businessName,
+                    currency = currency,
+                  )
+                recordedReceipt = RecordedPaymentReceipt(pty.name, pty.phone, msg)
+              }
+            }
+          },
+          enabled = !isBusy && ((mode == "invoice" && selectedInvoice != null) || (mode == "party" && selectedParty != null)),
+          modifier = Modifier.testTag("confirm_receive_payment_button"),
+        ) {
+          Text(if (isBusy) "Saving…" else "Save Payment")
+        }
+      }
+    },
+    dismissButton = {
+      if (recordedReceipt == null) {
+        TextButton(onClick = onDismiss, enabled = !isBusy) {
+          Text("Cancel")
+        }
+      }
+    },
+  )
+}

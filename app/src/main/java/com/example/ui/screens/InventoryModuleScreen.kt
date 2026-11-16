@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCartCheckout
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +63,7 @@ import com.example.data.model.InventoryItem
 import com.example.data.sync.ErpAppSettings
 import com.example.ui.theme.MonoMetricMedium
 import com.example.ui.viewmodel.UiState
+import com.example.util.WhatsAppShareHelper
 
 @Composable
 fun InventoryModuleContent(
@@ -109,7 +112,9 @@ fun InventoryModuleContent(
   onDismissAddItemDialog: () -> Unit,
   onOpenAddItemDialog: () -> Unit,
   canManageStock: Boolean = true,
+  businessName: String = "Finboss Billing No.1 ERP",
 ) {
+  val context = LocalContext.current
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var stockFilter by rememberSaveable { mutableStateOf("all") }
   var editingItem by remember { mutableStateOf<InventoryItem?>(null) }
@@ -266,6 +271,20 @@ fun InventoryModuleContent(
               currency = currency,
               isPlainNonGst = isPlainNonGst,
               canManageStock = canManageStock,
+              onShareWhatsApp = {
+                val msg =
+                  WhatsAppShareHelper.formatInventoryItemSummary(
+                    item = item,
+                    businessName = businessName,
+                    currency = currency,
+                    isPlainNonGst = isPlainNonGst,
+                  )
+                WhatsAppShareHelper.shareTextToWhatsApp(
+                  context = context,
+                  text = msg,
+                  chooserTitle = "Share Stock SKU on WhatsApp",
+                )
+              },
               onQuickIncrement = { onAdjustStock(item, 1.0) {} },
               onQuickDecrement = { onAdjustStock(item, -1.0) {} },
               onAdjustCustom = { adjustItem = item },
@@ -343,6 +362,7 @@ private fun InventoryItemCard(
   currency: String,
   isPlainNonGst: Boolean,
   canManageStock: Boolean = true,
+  onShareWhatsApp: () -> Unit,
   onQuickIncrement: () -> Unit,
   onQuickDecrement: () -> Unit,
   onAdjustCustom: () -> Unit,
@@ -431,12 +451,12 @@ private fun InventoryItemCard(
         }
       }
 
-      if (canManageStock) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (canManageStock) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             IconButton(onClick = onQuickDecrement, enabled = item.stockQty > 0.0) {
               Icon(Icons.Filled.Remove, contentDescription = "Decrease stock")
@@ -448,7 +468,22 @@ private fun InventoryItemCard(
               Icon(Icons.Filled.Add, contentDescription = "Increase stock")
             }
           }
-          Row {
+        } else {
+          Spacer(modifier = Modifier.width(4.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          IconButton(
+            onClick = onShareWhatsApp,
+            modifier = Modifier.size(48.dp).testTag("inventory_card_whatsapp_${item.id}"),
+          ) {
+            Icon(
+              imageVector = Icons.Filled.Share,
+              contentDescription = "Share Stock SKU on WhatsApp",
+              tint = MaterialTheme.colorScheme.secondary,
+              modifier = Modifier.size(18.dp),
+            )
+          }
+          if (canManageStock) {
             IconButton(onClick = onEdit) {
               Icon(Icons.Filled.Edit, contentDescription = "Edit SKU", modifier = Modifier.size(18.dp))
             }

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -55,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -66,6 +68,7 @@ import com.example.data.model.ErpParty
 import com.example.data.model.GstInvoice
 import com.example.ui.theme.MonoMetricMedium
 import com.example.ui.viewmodel.UiState
+import com.example.util.WhatsAppShareHelper
 
 private data class CashbookItem(
   val id: String,
@@ -106,7 +109,9 @@ fun ExpensesModuleContent(
   onDismissAddExpenseDialog: () -> Unit,
   onOpenAddExpenseDialog: () -> Unit,
   canManageExpenses: Boolean = true,
+  businessName: String = "Finboss Billing No.1 ERP",
 ) {
+  val context = LocalContext.current
   var viewMode by rememberSaveable { mutableStateOf("expenses") } // "expenses" or "cashbook"
   var categoryFilter by rememberSaveable { mutableStateOf("all") }
   var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -341,6 +346,20 @@ fun ExpensesModuleContent(
                 currency = currency,
                 isPlainNonGst = isPlainNonGst,
                 canManageExpenses = canManageExpenses,
+                onShareWhatsApp = {
+                  val msg =
+                    WhatsAppShareHelper.formatExpenseSummary(
+                      expense = exp,
+                      businessName = businessName,
+                      currency = currency,
+                      isPlainNonGst = isPlainNonGst,
+                    )
+                  WhatsAppShareHelper.shareTextToWhatsApp(
+                    context = context,
+                    text = msg,
+                    chooserTitle = "Share Expense Voucher on WhatsApp",
+                  )
+                },
                 onSettle = { onMarkSettled(exp.id, exp.paymentMethod) },
                 onEdit = { editingExpense = exp },
                 onDelete = { onDeleteExpense(exp.id) },
@@ -408,6 +427,7 @@ private fun ExpenseCard(
   currency: String,
   isPlainNonGst: Boolean,
   canManageExpenses: Boolean = true,
+  onShareWhatsApp: () -> Unit,
   onSettle: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
@@ -490,12 +510,23 @@ private fun ExpenseCard(
         )
       }
 
-      if (canManageExpenses) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.End,
-          verticalAlignment = Alignment.CenterVertically,
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        IconButton(
+          onClick = onShareWhatsApp,
+          modifier = Modifier.size(48.dp).testTag("expense_card_whatsapp_${expense.id}"),
         ) {
+          Icon(
+            imageVector = Icons.Filled.Share,
+            contentDescription = "Share Expense on WhatsApp",
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(18.dp),
+          )
+        }
+        if (canManageExpenses) {
           if (isPending) {
             TextButton(onClick = onSettle) {
               Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))

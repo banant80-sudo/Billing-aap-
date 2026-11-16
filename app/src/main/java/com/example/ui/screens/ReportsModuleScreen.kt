@@ -30,6 +30,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +57,7 @@ import com.example.data.model.ErpExpense
 import com.example.data.model.GstInvoice
 import com.example.ui.theme.MonoMetricLarge
 import com.example.ui.theme.MonoMetricMedium
+import com.example.util.WhatsAppShareHelper
 import java.util.Calendar
 
 private enum class ReportPeriod(val label: String) {
@@ -422,26 +424,49 @@ fun ReportsModuleContent(
     }
 
     item {
-      Button(
-        onClick = {
-          val text = buildShareableTaxReport(profile, period, report, currency, isPlainNonGst)
-          val shareIntent =
-            Intent(Intent.ACTION_SEND).apply {
-              type = "text/plain"
-              putExtra(
-                Intent.EXTRA_SUBJECT,
-                if (isPlainNonGst) "Finboss Business P&L Summary (${period.label})"
-                else "Finboss GST & P&L Report (${period.label})",
-              )
-              putExtra(Intent.EXTRA_TEXT, text)
-            }
-          context.startActivity(Intent.createChooser(shareIntent, "Share Report"))
-        },
-        modifier = Modifier.fillMaxWidth().height(50.dp).testTag("share_gst_report_button"),
-      ) {
-        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(if (isPlainNonGst) "Share Business P&L Summary" else "Share CA / Tax Filing Summary")
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Button(
+          onClick = {
+            val text = buildShareableTaxReport(profile, period, report, currency, isPlainNonGst)
+            val shareIntent =
+              Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(
+                  Intent.EXTRA_SUBJECT,
+                  if (isPlainNonGst) "Finboss Business P&L Summary (${period.label})"
+                  else "Finboss GST & P&L Report (${period.label})",
+                )
+                putExtra(Intent.EXTRA_TEXT, text)
+              }
+            context.startActivity(Intent.createChooser(shareIntent, "Share Report"))
+          },
+          modifier = Modifier.fillMaxWidth().height(50.dp).testTag("share_gst_report_button"),
+        ) {
+          Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(if (isPlainNonGst) "Share Business P&L Summary" else "Share CA / Tax Filing Summary")
+        }
+
+        OutlinedButton(
+          onClick = {
+            val text = buildShareableTaxReport(profile, period, report, currency, isPlainNonGst)
+            WhatsAppShareHelper.shareTextToWhatsApp(
+              context = context,
+              text = text,
+              chooserTitle = "Share Report on WhatsApp",
+            )
+          },
+          modifier = Modifier.fillMaxWidth().height(50.dp).testTag("share_gst_report_whatsapp_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Filled.Share,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(18.dp),
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text("Share Report on WhatsApp", color = MaterialTheme.colorScheme.secondary)
+        }
       }
     }
   }
