@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.repository.GstPortalApiResponse
 import com.example.data.repository.GstPortalRepository
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,58 +22,51 @@ class GstPortalViewModel(
     private val repository: GstPortalRepository = GstPortalRepository(),
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
 ) : ViewModel() {
-
     private val _state = MutableStateFlow<GstPortalUiState>(GstPortalUiState.Idle)
     val state: StateFlow<GstPortalUiState> = _state.asStateFlow()
 
-    fun requestOtp(
-        profileId: String = "main_1",
-        gstin: String,
-        gstUsername: String,
-    ) {
-        launchRequest {
-            val token = auth.currentUser?.getIdToken(true)?.await()?.token
-                ?: throw IllegalStateException("Please sign in before using GST services.")
-            repository.requestOtp(profileId, gstin, gstUsername, token)
-        }
+    fun clearState() { _state.value = GstPortalUiState.Idle }
+
+    fun requestOtp(profileId: String, gstin: String, username: String, email: String) = launchRequest {
+        repository.requestOtp(profileId, gstin, username, email, firebaseToken())
     }
 
-    fun verifyOtp(
-        profileId: String = "main_1",
-        gstin: String,
-        gstUsername: String,
-        otp: String,
-    ) {
-        launchRequest {
-            val token = auth.currentUser?.getIdToken(true)?.await()?.token
-                ?: throw IllegalStateException("Please sign in before using GST services.")
-            repository.verifyOtp(profileId, gstin, gstUsername, otp, token)
-        }
+    fun verifyOtp(profileId: String, gstin: String, username: String, email: String, otp: String) = launchRequest {
+        repository.verifyOtp(profileId, gstin, username, email, otp, firebaseToken())
     }
 
-    fun uploadGstr1(
-        profileId: String = "main_1",
+    fun uploadGstr1(profileId: String, returnPeriod: String, returnDataJson: String) = launchRequest {
+        repository.uploadGstr1(profileId, returnPeriod, returnDataJson, firebaseToken())
+    }
+
+    fun saveGstr3b(profileId: String, returnPeriod: String, returnDataJson: String) = launchRequest {
+        repository.saveGstr3b(profileId, returnPeriod, returnDataJson, firebaseToken())
+    }
+
+    fun fileGstr3bWithEvc(
+        profileId: String,
         returnPeriod: String,
-        returnData: Map<String, Any>,
-    ) {
-        launchRequest {
-            val token = auth.currentUser?.getIdToken(true)?.await()?.token
-                ?: throw IllegalStateException("Please sign in before using GST services.")
-            repository.uploadGstr1(profileId, returnPeriod, returnData, token)
-        }
+        pan: String,
+        otp: String,
+        returnDataJson: String,
+    ) = launchRequest {
+        repository.fileGstr3bWithEvc(profileId, returnPeriod, pan, otp, returnDataJson, firebaseToken())
     }
+
+    private suspend fun firebaseToken(): String =
+        auth.currentUser?.getIdToken(true)?.await()?.token
+            ?: throw IllegalStateException("Please sign in before using GST services.")
 
     private fun launchRequest(block: suspend () -> GstPortalApiResponse) {
         viewModelScope.launch {
             _state.value = GstPortalUiState.Loading
             runCatching { block() }
                 .onSuccess { result ->
-                    _state.value = GstPortalUiState.Result(result)
+                    _state.value = if (result.success) GstPortalUiState.Result(result)
+                    else GstPortalUiState.Error(result.message)
                 }
-                .onFailure { throwable ->
-                    _state.value = GstPortalUiState.Error(
-                        throwable.message ?: "GST portal request failed."
-                    )
+                .onFailure { error ->
+                    _state.value = GstPortalUiState.Error(error.message ?: "GST portal request failed.")
                 }
         }
     }
