@@ -34,14 +34,19 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Release APK
-        run: gradle assembleRelease
+      - name: Build Signed Release APK
+        run: |
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=$PWD/release.keystore \
+            -Pandroid.injected.signing.store.password=android123 \
+            -Pandroid.injected.signing.key.alias=finbosskey \
+            -Pandroid.injected.signing.key.password=android123
 
-      - name: Sign Release APK (v1, v2, v3)
+      - name: Re-sign with v1, v2, v3 for ColorOS 13
         run: |
           BUILD_TOOLS=$(find $ANDROID_HOME/build-tools -maxdepth 1 | sort -V | tail -n 1)
-          RAW_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          $BUILD_TOOLS/zipalign -v -p 4 "$RAW_APK" app-aligned.apk
+          BUILT_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          $BUILD_TOOLS/zipalign -v -p 4 "$BUILT_APK" app-aligned.apk
           $BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass pass:android123 --key-pass pass:android123 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out Finboss-Billing-Signed.apk app-aligned.apk
 
       - name: Upload Signed APK Artifact
