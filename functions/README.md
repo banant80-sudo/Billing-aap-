@@ -1,25 +1,43 @@
-# Firebase GST backend
+# Firebase Cloud Functions GST backend — Sandbox.co.in adapter
 
-This project uses Firebase for app authentication and data. Live GST/GSP traffic must go through this Cloud Functions backend; never put GSP credentials or GST auth tokens in the browser or Android app.
+The Finboss app uses Firebase for sign-in and data. GST API calls go through this Cloud Functions backend, so Sandbox API credentials and GST taxpayer tokens are never sent to the browser or Android app.
 
-## What is included
+## Included endpoints
 
-- Firebase-authenticated HTTPS endpoints for OTP request, OTP verification, GSTR-1 save, and logout.
+- Firebase-authenticated OTP request and OTP verification using Sandbox.co.in's GST compliance API.
 - OTP throttling per signed-in user and GST business profile.
-- GST auth sessions encrypted with AES-256-GCM before being stored in a Firestore subcollection. Firestore rules deny client access to these records; Cloud Functions uses the Admin SDK.
-- Hosting rewrite from `/api/**` to the `gstApi` function.
+- Taxpayer access token encrypted with AES-256-GCM in the user's Firestore `gst_sessions` subcollection. Firestore rules deny client access; only Cloud Functions Admin SDK accesses these records.
+- GSTR-1 save request to Sandbox's documented year/month endpoint.
+- Firebase Hosting rewrite from `/api/**` to the `gstApi` function.
 
-The GSP URL and payload shown in the original sample are not universal GSTN endpoints. This backend follows that sample's `/authenticate` and `/returns/gstr1` contract as a starting adapter. Confirm the exact paths, headers, token response shape, and GSTR-1 schema with your contracted GSP before production use. The upload endpoint currently accepts `invoicesData` already formatted as the GSP-required B2B invoice array; it does not convert Finboss invoice documents into a certified return payload.
+## Provider contract used
 
-## Configure Firebase
+The adapter uses Sandbox API host `https://api.sandbox.co.in`:
 
-1. Select the Firebase project associated with Finboss and enable Cloud Functions. Functions deployment generally requires the Blaze (pay-as-you-go) plan; check the current Firebase plan requirements before deploying.
-2. Install Firebase CLI and authenticate, then from the repository root run `firebase use <your-project-id>`.
-3. Set the GSP secrets using Secret Manager. Do not commit real values:
+1. `POST /authenticate` with `x-api-key`, `x-api-secret`, and `x-api-version` to get a Sandbox API token.
+2. `POST /gst/compliance/tax-payer/otp` with the taxpayer username and GSTIN to request OTP.
+3. `POST /gst/compliance/tax-payer/otp/verify?otp=...` with username and GSTIN to obtain the six-hour taxpayer token.
+4. `POST /gst/compliance/tax-payer/gstrs/gstr-1/{year}/{month}` with the documented GSTR-1 return JSON and taxpayer token to save the return.
+
+Sandbox API details and account/plan requirements can change; verify the exact contract in your Sandbox developer dashboard and test using a sandbox GSTIN before production. A successful GSTR-1 save request is not the same as filing the return; proceed-to-file, EVC/DSC verification, and filing-status steps are separate flows and are not implemented here.
+
+The GSTR-1 endpoint accepts `returnData`, an object formatted to Sandbox's current GSTN return schema. The backend sets/overrides `gstin` and `fp` from the authenticated business profile and `MMYYYY` period. It does not convert the app's invoice records into all applicable GSTR-1 sections, calculate HSN summaries, or certify tax correctness.
+
+## Firebase setup and deployment
+
+1. Enable Cloud Functions for the Firebase project associated with Finboss. Firebase Functions deployment may require the Blaze (pay-as-you-go) plan; check the current Firebase plan requirements before deploying.
+2. Install Firebase CLI, sign in, and select the correct project from the repository root:
 
    ```bash
-   firebase functions:secrets:set GSP_CLIENT_ID
-   firebase functions:secrets:set GSP_CLIENT_SECRET
+   firebase login
+   firebase use <your-project-id>
+   ```
+
+3. Set Sandbox API credentials in Firebase Secret Manager. Do not commit credentials or paste them into the frontend:
+
+   ```bash
+   firebase functions:secrets:set SANDBOX_API_KEY
+   firebase functions:secrets:set SANDBOX_API_SECRET
    ```
 
 4. Generate a 32-byte encryption key and set it as a secret:
@@ -29,19 +47,20 @@ The GSP URL and payload shown in the original sample are not universal GSTN endp
    firebase functions:secrets:set GSP_TOKEN_ENCRYPTION_KEY
    ```
 
-   Preserve this key securely. Rotating it invalidates existing encrypted GST sessions; users can authenticate again after rotation.
+   Keep this key backed up securely. Rotating it makes stored taxpayer sessions unreadable; users must authenticate again.
 
-5. Create `functions/.env.<your-project-id>` (do not commit it) with the provider's HTTPS base URL, a real provider-approved server IP if required, and exact allowed web origins:
+5. Create `functions/.env.<your-project-id>` locally (do not commit it) with allowed web origins. Defaults are the Sandbox production API host, API version `1.0.0`, and source `primary`:
 
    ```dotenv
-   GSP_BASE_URL=https://your-real-gsp-host
-   GSP_IP_USER=YOUR_PROVIDER_APPROVED_STATIC_EGRESS_IP
    GST_ALLOWED_ORIGINS=https://your-finboss-host.web.app,https://your-finboss-host.firebaseapp.com,http://localhost:8080
+   SANDBOX_BASE_URL=https://api.sandbox.co.in
+   SANDBOX_API_VERSION=1.0.0
+   SANDBOX_GST_SOURCE=primary
    ```
 
-   `GSP_IP_USER` must be the IP address your GSP has authorized. A serverless function may not have a stable outbound IP unless static egress is configured, so coordinate networking with the GSP. Never use a hard-coded sample/client IP.
+   The Firebase Hosting origin must be listed exactly. Android requests do not use browser CORS, but still require a Firebase ID token.
 
-6. Deploy the function and hosting rewrite:
+6. Install and deploy:
 
    ```bash
    cd functions && npm install && cd ..
@@ -49,15 +68,19 @@ The GSP URL and payload shown in the original sample are not universal GSTN endp
    firebase deploy --only hosting --config web-portal/firebase.hosting.json
    ```
 
-   Ensure the hosting config is deployed to the same Firebase project. The rewrite points to `gstApi` in `asia-south1`.
+   Deploy both to the same Firebase project. Hosting routes `/api/**` to `gstApi` in `asia-south1`.
 
-## API
+## API calls
 
-Every endpoint requires `Authorization: Bearer <Firebase ID token>` from the currently signed-in Finboss user. Requests use JSON and must be sent to `/api/gst/...` on the deployed Hosting origin.
+Every endpoint requires `Authorization: Bearer <Firebase ID token>` for the signed-in Finboss user. Use JSON and call `/api/gst/...` on the deployed Hosting origin. Never send Sandbox API secrets or the taxpayer access token from the client.
 
 - `POST /api/gst/request-otp` — `{ "profileId": "main_1", "gstin": "...", "gstUsername": "..." }`
-- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The provider auth token is encrypted and stored server-side; it is never returned to the client.
-- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "invoicesData": [...] }`. `invoicesData` must match the GSP's required B2B schema.
-- `POST /api/gst/logout` — `{ "profileId": "main_1" }` removes the encrypted server-side session.
+- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The taxpayer token is encrypted and stored server-side; it is not returned to the client.
+- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { "b2b": [], "...": "other applicable GSTR-1 sections" } }`. `returnData` must follow the Sandbox/GSTN schema.
+- `POST /api/gst/logout` — `{ "profileId": "main_1" }` deletes that profile's encrypted session.
 
-The GSTIN must match the selected `business_profiles/{profileId}` record. Plain non-GST profiles are rejected. Test in the GSP sandbox first; successful RETSAVE is not the same as filing a return on the GST portal. Review the portal/GSP response and complete any required filing/signing steps separately.
+The GSTIN must match `users/{uid}/business_profiles/{profileId}`. Plain non-GST profile IDs are rejected. The browser/app must obtain the Firebase ID token from Firebase Auth and send it as a Bearer token. The frontend UI is not yet wired to these endpoints.
+
+## Important operational note
+
+Sandbox's API token, taxpayer token, allowed API plan, account configuration, and GSTR-1 schema must be tested with your own Sandbox account. No live request has been made from this code change, and deployment/secrets are not configured automatically by committing these files.
