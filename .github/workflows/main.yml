@@ -22,6 +22,7 @@ jobs:
       - name: Generate Release Keystore & Firebase String
         run: |
           keytool -genkey -v -keystore release.keystore -storepass android123 -alias finbosskey -keypass android123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Finboss,O=RaghavEnterprises,C=IN"
+          cp release.keystore my-upload-key.jks
           mkdir -p app/src/main/res/values
           cat <<EOF > app/src/main/res/values/google_services_fix.xml
           <?xml version="1.0" encoding="utf-8"?>
@@ -39,8 +40,8 @@ jobs:
       - name: Sign Release APK (v1, v2, v3)
         run: |
           BUILD_TOOLS=$(find $ANDROID_HOME/build-tools -maxdepth 1 | sort -V | tail -n 1)
-          UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          $BUILD_TOOLS/zipalign -v -p 4 "$UNSIGNED_APK" app-aligned.apk
+          RAW_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          $BUILD_TOOLS/zipalign -v -p 4 "$RAW_APK" app-aligned.apk
           $BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass pass:android123 --key-pass pass:android123 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out Finboss-Billing-Signed.apk app-aligned.apk
 
       - name: Upload Signed APK Artifact
