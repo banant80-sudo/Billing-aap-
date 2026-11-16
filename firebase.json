@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
+  },
   "firestore": [
     {
       "database": "ai-studio-android-finbosse-8c9fbc7b-98a3-412d-8ccf-3779b232a5b8",
