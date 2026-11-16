@@ -6,11 +6,13 @@ The Finboss app uses Firebase for sign-in and data. GST API calls pass through t
 
 - OTP request: `GET /authentication/otprequest?email=...`
 - OTP verification/token: `GET /authentication/authtoken?email=...&otp=...`
-- Save GSTR-1 draft: `PUT /gstr1/retsave?email=...`
+- GSTR-1 draft save: `PUT /gstr1/retsave?email=...`
+- GSTR-3B draft save: `PUT /gstr3b/retsave?email=...`
+- GSTR-3B EVC final filing: `POST /gstr3b/retevcfile?email=...&pan=...` (path configurable with `GSTR3B_EVC_FILE_PATH`)
 
 The API base defaults to `https://apisandbox.whitebooks.in`. Production may use `https://api.whitebooks.in` only when your WhiteBooks account is approved and configured for production.
 
-OTP-request transaction IDs are encrypted server-side for 10 minutes and used only during verification. The taxpayer access token is encrypted at rest in Firestore and never returned to the app. Each request requires a valid Firebase ID token. OTP requests are throttled per user/business profile.
+OTP-request transaction IDs and taxpayer access tokens are encrypted server-side in Firestore and never returned to the app. Each endpoint requires a valid Firebase ID token. OTP requests are throttled per user/business profile.
 
 ## Configure Firebase
 
@@ -38,7 +40,7 @@ OTP-request transaction IDs are encrypted server-side for 10 minutes and used on
 
    Keep the key securely backed up. Rotating it invalidates currently stored encrypted GST sessions.
 
-5. Create `functions/.env.<your-project-id>` locally; do not commit it. Set the IP WhiteBooks has authorized for your account and the exact portal origins:
+5. Create `functions/.env.<your-project-id>` locally; do not commit it. Set the IP WhiteBooks has authorized and the exact portal origins:
 
    ```dotenv
    GSP_BASE_URL=https://apisandbox.whitebooks.in
@@ -63,12 +65,16 @@ OTP-request transaction IDs are encrypted server-side for 10 minutes and used on
 Every route requires `Authorization: Bearer <Firebase ID token>` and JSON requests to `/api/gst/...`.
 
 - `POST /api/gst/request-otp` — `{ "profileId": "main_1", "gstin": "...", "gstUsername": "...", "email": "..." }`
-- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The pending transaction ID must match the OTP request and is handled server-side.
-- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { ... } }`. `returnData` must match WhiteBooks' current GSTN GSTR-1 schema. The backend sets GSTIN and `fp` from the authenticated profile/period.
+- `POST /api/gst/verify-otp` — same fields plus `{ "otp": "..." }`. The pending transaction ID is stored encrypted and used server-side.
+- `POST /api/gst/upload-gstr1` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { ... } }`. Payload must follow the current WhiteBooks GSTR-1 schema.
+- `POST /api/gst/gstr3b/save` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "returnData": { ... } }`. Saves/prepares GSTR-3B; does not file it.
+- `POST /api/gst/gstr3b/file-evc` — `{ "profileId": "main_1", "returnPeriod": "MMYYYY", "pan": "...", "otp": "...", "confirmFinalFiling": "FILE_GSTR3B", "returnData": { ... } }`. This is a final legal filing request. The app must show the exact GSTIN and return period for review, collect the authorized signatory's EVC, and require explicit confirmation. No retries should be made automatically.
 - `POST /api/gst/logout` — `{ "profileId": "main_1" }` clears encrypted session data.
 
-The business profile GSTIN must match the request. Non-GST profile IDs are rejected. The UI still needs to send the required email field and create a valid GSTR-1 return object from invoice records; arbitrary invoice arrays are not a compliant GSTR-1 payload.
+The business profile GSTIN must match. The UI must prepare a valid WhiteBooks GSTR-3B payload from verified accounting data; the API does not calculate tax or certify correctness.
 
-## Important
+## Important filing caveats
 
-`PUT /gstr1/retsave` saves/prepares return data; it does not by itself complete or file the legal return. Final filing, verification/signature and status checks are separate operations and are not implemented. Verify the exact current endpoint headers, response fields, account requirements, and payload schema in your WhiteBooks developer portal and sandbox before production use. The API adapter has not been deployed or tested against a live provider account.
+`PUT /gstr3b/retsave` only saves the return. The EVC route submits a legal return. Confirm exact endpoint, required request/response fields, EVC process, and schema in your authenticated WhiteBooks developer portal before using a live GSTIN. The EVC path defaults to `/gstr3b/retevcfile`, based on WhiteBooks endpoint documentation; set `GSTR3B_EVC_FILE_PATH` only if WhiteBooks confirms a different path for your account/version. Do not enable production filing until the full workflow has been tested in sandbox and reviewed by the authorized taxpayer/signatory.
+
+A timeout during final filing may mean the provider accepted the return but the response was lost. The backend returns an uncertain status message; check filing status with WhiteBooks/GST portal before attempting again.

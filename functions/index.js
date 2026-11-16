@@ -12,6 +12,7 @@ const clientSecretSecret = defineSecret("GSP_CLIENT_SECRET");
 const tokenKeySecret = defineSecret("GSP_TOKEN_ENCRYPTION_KEY");
 const app = express();
 const BASE_URL = (process.env.GSP_BASE_URL || "https://apisandbox.whitebooks.in").replace(/\/+$/, "");
+const GSTR3B_EVC_FILE_PATH = process.env.GSTR3B_EVC_FILE_PATH || "/gstr3b/retevcfile";
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb", strict: true }));
 
@@ -58,6 +59,11 @@ function validateGstin(value) {
   const gstin = String(value || "").trim().toUpperCase();
   if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) throw httpError(400, "Enter a valid 15-character GSTIN.");
   return gstin;
+}
+function validatePeriod(value) {
+  const period = String(value || "").trim();
+  if (!/^(0[1-9]|1[0-2])\d{4}$/.test(period)) throw httpError(400, "Return period must use MMYYYY format.");
+  return period;
 }
 function validateBaseUrl() {
   let parsed;
@@ -132,6 +138,22 @@ function pickTxn(body) {
 function pickAccessToken(body) {
   const token = body?.data?.auth_token || body?.auth_token || body?.data?.access_token || body?.access_token || body?.data?.authToken;
   return typeof token === "string" ? token : "";
+}
+function getSession(stored) {
+  if (!stored.exists || Number(stored.get("expiresAtMs") || 0) <= Date.now()) {
+    throw httpError(401, "GST session missing or expired. Request and verify a new OTP.");
+  }
+  return decryptSession(stored.data());
+}
+function responseSummary(response) {
+  const data = response.data || {};
+  return {
+    referenceId: data?.data?.reference_id || data?.reference_id || data?.data?.referenceId || data?.referenceId || data?.data?.arn || data?.arn || null,
+    providerStatus: data?.data?.status || data?.status || data?.data?.status_cd || "received"
+  };
+}
+function assertReturnObject(value, message) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw httpError(400, message);
 }
 
 app.post("/api/gst/request-otp", asyncRoute(async (req, res) => {
@@ -220,13 +242,10 @@ app.post("/api/gst/verify-otp", asyncRoute(async (req, res) => {
 
 app.post("/api/gst/upload-gstr1", asyncRoute(async (req, res) => {
   const profileId = validateProfileId(req.body.profileId);
-  const returnPeriod = String(req.body.returnPeriod || "").trim();
+  const returnPeriod = validatePeriod(req.body.returnPeriod);
   const returnData = req.body.returnData;
-  if (!/^(0[1-9]|1[0-2])\d{4}$/.test(returnPeriod)) throw httpError(400, "Return period must use MMYYYY format.");
-  if (!returnData || typeof returnData !== "object" || Array.isArray(returnData)) throw httpError(400, "Provide a GSTR-1 JSON object using the WhiteBooks schema.");
-  const stored = await sessionRef(req.user.uid, profileId).get();
-  if (!stored.exists || Number(stored.get("expiresAtMs") || 0) <= Date.now()) throw httpError(401, "GST session missing or expired. Request and verify a new OTP.");
-  const session = decryptSession(stored.data());
+  assertReturnObject(returnData, "Provide a GSTR-1 JSON object using the WhiteBooks schema.");
+  const session = getSession(await sessionRef(req.user.uid, profileId).get());
   await verifyProfile(req.user.uid, profileId, session.gstin);
   const payload = { ...returnData, gstin: session.gstin, fp: returnPeriod };
 
@@ -243,14 +262,79 @@ app.post("/api/gst/upload-gstr1", asyncRoute(async (req, res) => {
       maxRedirects: 0,
       maxContentLength: 1_000_000
     });
-    res.json({
-      success: true,
-      referenceId: response.data?.data?.reference_id || response.data?.reference_id || response.data?.data?.referenceId || response.data?.referenceId || null,
-      providerStatus: response.data?.data?.status || response.data?.status || "received"
-    });
+    res.json({ success: true, ...responseSummary(response) });
   } catch (error) {
     if (error.status) throw error;
     const failure = providerError(error);
+    throw httpError(failure.status, failure.message);
+  }
+}));
+
+app.post("/api/gst/gstr3b/save", asyncRoute(async (req, res) => {
+  const profileId = validateProfileId(req.body.profileId);
+  const returnPeriod = validatePeriod(req.body.returnPeriod);
+  const returnData = req.body.returnData;
+  assertReturnObject(returnData, "Provide a GSTR-3B JSON object using WhiteBooks' schema.");
+  const session = getSession(await sessionRef(req.user.uid, profileId).get());
+  await verifyProfile(req.user.uid, profileId, session.gstin);
+
+  const payload = { ...returnData, gstin: session.gstin, ret_period: returnPeriod };
+  try {
+    const response = await axios.put(`${validateBaseUrl()}/gstr3b/retsave`, payload, {
+      params: { email: session.email },
+      headers: {
+        ...makeGstHeaders(session.gstin, session.username),
+        ret_period: returnPeriod,
+        "auth-token": session.authToken,
+        "Content-Type": "application/json"
+      },
+      timeout: 30_000,
+      maxRedirects: 0,
+      maxContentLength: 1_000_000
+    });
+    res.json({ success: true, ...responseSummary(response), filed: false });
+  } catch (error) {
+    if (error.status) throw error;
+    const failure = providerError(error);
+    throw httpError(failure.status, failure.message);
+  }
+}));
+
+app.post("/api/gst/gstr3b/file-evc", asyncRoute(async (req, res) => {
+  const profileId = validateProfileId(req.body.profileId);
+  const returnPeriod = validatePeriod(req.body.returnPeriod);
+  const otp = String(req.body.otp || "").trim();
+  const pan = String(req.body.pan || "").trim().toUpperCase();
+  const confirmation = req.body.confirmFinalFiling;
+  const returnData = req.body.returnData;
+  if (confirmation !== "FILE_GSTR3B") throw httpError(400, "Explicit filing confirmation is required: confirmFinalFiling must equal FILE_GSTR3B.");
+  if (!/^\d{4,8}$/.test(otp)) throw httpError(400, "Enter the EVC OTP received by the authorized signatory.");
+  if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) throw httpError(400, "Enter a valid authorized signatory PAN.");
+  assertReturnObject(returnData, "Provide the final reviewed GSTR-3B JSON object.");
+  const session = getSession(await sessionRef(req.user.uid, profileId).get());
+  await verifyProfile(req.user.uid, profileId, session.gstin);
+
+  const payload = { ...returnData, gstin: session.gstin, ret_period: returnPeriod, otp };
+  try {
+    const response = await axios.post(`${validateBaseUrl()}${GSTR3B_EVC_FILE_PATH}`, payload, {
+      params: { email: session.email, pan },
+      headers: {
+        ...makeGstHeaders(session.gstin, session.username, `FB${crypto.randomUUID().replace(/-/g, "")}`),
+        ret_period: returnPeriod,
+        "auth-token": session.authToken,
+        "Content-Type": "application/json"
+      },
+      timeout: 45_000,
+      maxRedirects: 0,
+      maxContentLength: 1_000_000
+    });
+    res.json({ success: true, filed: true, ...responseSummary(response) });
+  } catch (error) {
+    if (error.status) throw error;
+    const failure = providerError(error);
+    if (!error.response) {
+      throw httpError(502, "Filing response is uncertain. Check GSTR-3B status with WhiteBooks/GST portal before retrying.");
+    }
     throw httpError(failure.status, failure.message);
   }
 }));
