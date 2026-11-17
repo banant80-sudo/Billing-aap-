@@ -144,7 +144,7 @@ object WhatsAppShareHelper {
     isPlainNonGst: Boolean,
   ): String =
     buildString {
-      val sender = profile?.businessName?.ifBlank { null } ?: "Book"
+      val sender = profile?.businessName?.ifBlank { null } ?: "Finboss Billing No.1 ERP"
       appendLine("*$sender*")
       appendLine("${if (isPlainNonGst) "Bill" else "Tax Invoice"}: *${invoice.invoiceNumber}*")
       appendLine("Customer: ${invoice.partyName}")
@@ -163,7 +163,7 @@ object WhatsAppShareHelper {
       if (!isPlainNonGst && invoice.hasEWayBill) {
         appendLine("E-Way Bill: #${invoice.ewbNumber} (${invoice.distanceKm} KM)")
       }
-      appendLine("_Shared via Book_")
+      appendLine("_Shared via Finboss Billing No.1 ERP_")
     }
 
   fun formatPaymentReceiptMessage(
@@ -182,7 +182,7 @@ object WhatsAppShareHelper {
       appendLine("Amount Received: *${formatErpMoney(currency, amountPaid)}* (${paymentMethod.uppercase()})")
       appendLine("Remaining Balance: ${formatErpMoney(currency, remainingDue.coerceAtLeast(0.0))}")
       appendLine("Thank you for your payment!")
-      appendLine("_Book_")
+      appendLine("_Finboss Billing No.1 ERP_")
     }
 
   fun formatPartyStatementSummary(
@@ -191,7 +191,7 @@ object WhatsAppShareHelper {
     currency: String,
   ): String =
     buildString {
-      val typeLabel = if (party.partyType == ErpParty.TYPE_CUSTOMER) "Customer Khata" else "Supplier Ledger"
+      val typeLabel = if (party.partyType == ErpParty.TYPE_CUSTOMER) "Customer Ledger" else "Supplier Ledger"
       appendLine("*$typeLabel Statement • $businessName*")
       appendLine("Party: *${party.name}*")
       if (party.gstin.isNotBlank()) appendLine("GSTIN: ${party.gstin}")
@@ -199,7 +199,7 @@ object WhatsAppShareHelper {
       appendLine("Total Paid: ${formatErpMoney(currency, party.totalPaid)}")
       appendLine("Opening Balance: ${formatErpMoney(currency, party.openingDue)}")
       appendLine("Net Balance Due: *${formatErpMoney(currency, party.outstandingBalance)}*")
-      appendLine("_Shared via Book_")
+      appendLine("_Shared via Finboss Billing No.1 ERP_")
     }
 
   fun formatInventoryItemSummary(
@@ -216,7 +216,7 @@ object WhatsAppShareHelper {
       }
       appendLine("Sale Rate: *${formatErpMoney(currency, item.salePrice)}* / ${item.unit}")
       appendLine("Available Stock: ${item.stockQty} ${item.unit}")
-      appendLine("_Shared via Book_")
+      appendLine("_Shared via Finboss Billing No.1 ERP_")
     }
 
   fun formatExpenseSummary(
@@ -234,7 +234,7 @@ object WhatsAppShareHelper {
       if (!isPlainNonGst && expense.gstInputAmount > 0.0) {
         appendLine("GST Input Credit: ${formatErpMoney(currency, expense.gstInputAmount)}")
       }
-      appendLine("_Shared via Book_")
+      appendLine("_Shared via Finboss Billing No.1 ERP_")
     }
 
   fun formatDashboardOverviewSummary(
@@ -254,6 +254,6 @@ object WhatsAppShareHelper {
       if (!isPlainNonGst) {
         appendLine("Net GST Due: ${formatErpMoney(currency, kpi.netGstPayable)}")
       }
-      appendLine("_Shared via Book_")
+      appendLine("_Shared via Finboss Billing No.1 ERP_")
     }
 }

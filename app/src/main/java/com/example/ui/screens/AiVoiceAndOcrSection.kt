@@ -127,7 +127,7 @@ fun VoiceToInvoiceAndExpenseSection(
           fontWeight = FontWeight.Bold,
         )
         Text(
-          text = "Speak in English, Hindi, or Hinglish to auto-fill a GST Bill or Expense entry using Book AI.",
+          text = "Speak in English, Hindi, or Hinglish to auto-fill a GST Bill or Expense entry using Finboss AI.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -204,7 +204,7 @@ fun VoiceToInvoiceAndExpenseSection(
             ) {
               CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
               Text(
-                text = "Analyzing audio with Book AI...",
+                text = "Analyzing audio with Finboss AI...",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
               )
@@ -309,7 +309,7 @@ fun VoiceToInvoiceAndExpenseSection(
 
           if (draft.isInvoice) {
             Text(
-              text = "Customer: ${draft.partyName}${if (draft.matchedPartyId.isNotBlank()) " (Matched Khata)" else " (Walk-in)"}",
+              text = "Customer: ${draft.partyName}${if (draft.matchedPartyId.isNotBlank()) " (Matched Ledger)" else " (Walk-in)"}",
               style = MaterialTheme.typography.bodyMedium,
               fontWeight = FontWeight.SemiBold,
             )
@@ -490,7 +490,7 @@ fun BillPhotoOcrSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
-            Text("Scanning bill lines & GST values with Book AI...", style = MaterialTheme.typography.bodyMedium)
+            Text("Scanning bill lines & GST values with Finboss AI...", style = MaterialTheme.typography.bodyMedium)
           }
         }
       }

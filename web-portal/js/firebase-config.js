@@ -8,6 +8,7 @@ export const FIREBASE_WEB_CONFIG = {
 };
 
 export const FIRESTORE_DATABASE_ID = "ai-studio-android-finbosse-8c9fbc7b-98a3-412d-8ccf-3779b232a5b8";
+export const RECAPTCHA_SITE_KEY = "6LfqwCIuAAAAAOw37n0J8tsro_5vT_PvIlA24BCC";
 export const ADMIN_RECEIPT_EMAIL = "banant80@gmail.com";
 export const MERCHANT_BENEFICIARY_NAME = "Raghav Enterprises";
 export const MERCHANT_UPI_ID = "anantbharat@ybl";

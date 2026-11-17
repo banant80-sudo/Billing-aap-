@@ -128,7 +128,7 @@ fun AiCopilotScreenContent(
         ) {
           Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
           Text(
-            text = "Book AI • ${invoices.size} Bills • ${parties.size} Parties • ${inventory.size} SKUs",
+            text = "Finboss AI • ${invoices.size} Bills • ${parties.size} Parties • ${inventory.size} SKUs",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -191,7 +191,7 @@ fun AiCopilotScreenContent(
           onShareAnswerWhatsApp = { answerText ->
             WhatsAppShareHelper.shareTextToWhatsApp(
               context = context,
-              text = "*Book AI Business Analysis*\n\n$answerText\n\n_Shared via Book_",
+              text = "*Finboss Billing No.1 ERP AI Analysis*\n\n$answerText\n\n_Shared via Finboss Billing No.1 ERP_",
               chooserTitle = "Share AI Analysis on WhatsApp",
             )
           },
@@ -335,7 +335,7 @@ private fun AiAnalystChatPane(
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                   CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                  Text("Analyzing Book ledger & P&L...", style = MaterialTheme.typography.bodySmall)
+                  Text("Analyzing Finboss ledger & P&L...", style = MaterialTheme.typography.bodySmall)
                 }
               } else {
                 Text(text = msg.text, style = MaterialTheme.typography.bodyMedium)
@@ -372,7 +372,7 @@ private fun AiAnalystChatPane(
       OutlinedTextField(
         value = inputText,
         onValueChange = { inputText = it },
-        placeholder = { Text("Ask Book AI about sales, party P&L, stock...") },
+        placeholder = { Text("Ask Finboss AI about sales, party P&L, stock...") },
         modifier = Modifier.weight(1f).testTag("ai_chat_input"),
         maxLines = 3,
       )

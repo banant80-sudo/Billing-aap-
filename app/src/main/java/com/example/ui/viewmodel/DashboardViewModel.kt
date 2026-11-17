@@ -779,7 +779,7 @@ class DashboardViewModel(
       _isBusy.value = false
       res
         .onSuccess {
-          _statusBanner.value = if (existingId == null) "Party added to Khata" else "Party updated"
+          _statusBanner.value = if (existingId == null) "Party added to Ledger" else "Party updated"
           onDone()
         }
         .onFailure { err -> _statusBanner.value = err.localizedMessage ?: "Failed to save party" }
@@ -793,7 +793,7 @@ class DashboardViewModel(
       _isBusy.value = false
       res
         .onSuccess {
-          _statusBanner.value = "Khata payment recorded"
+          _statusBanner.value = "Party Ledger payment recorded"
           onDone()
         }
         .onFailure { err -> _statusBanner.value = err.localizedMessage ?: "Payment failed" }

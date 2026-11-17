@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Book</string>
-    <string name="brand_full_title">Book</string>
+    <string name="app_name">Finboss ERP</string>
+    <string name="brand_full_title">Finboss Billing No.1 ERP</string>
     <string name="erp_edition_badge">MODULAR CLOUD ERP</string>
     <string name="auth_hero_subtitle">Smart billing, GST compliance, and real-time enterprise control built module by module.</string>
     <string name="auth_card_title">Workspace Sign-In</string>
@@ -14,8 +14,8 @@
     <string name="sign_in_with_google">Sign in with Google</string>
     <string name="auth_checking_session">Checking session…</string>
     <string name="auth_signing_in">Signing in…</string>
-    <string name="auth_footer_note">Sign in with your Google account to initialize your Book business profile.</string>
-    <string name="cd_auth_hero_banner">Book ledger and analytics banner</string>
+    <string name="auth_footer_note">Sign in with your Google account to initialize your Finboss Billing No.1 ERP business profile.</string>
+    <string name="cd_auth_hero_banner">Finboss Billing No.1 ERP ledger and analytics banner</string>
     <string name="cd_business_emblem">Business workspace emblem</string>
     <string name="cd_user_avatar">Signed in user profile picture</string>
     <string name="nav_overview">Overview</string>

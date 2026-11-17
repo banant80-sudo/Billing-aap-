@@ -9,6 +9,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -91,6 +92,9 @@ fun attemptAutoSignIn(
       } else {
         onUnauthenticated()
       }
+    } catch (e: NoCredentialException) {
+      Log.d(AUTH_TAG, "No saved Google credentials for auto sign-in: ${e.message}")
+      onUnauthenticated()
     } catch (e: Exception) {
       Log.d(AUTH_TAG, "Silent auto sign-in skipped: ${e.message}")
       onUnauthenticated()
@@ -138,6 +142,9 @@ fun onGoogleSignInClicked(
     } catch (e: GetCredentialCancellationException) {
       Log.w(AUTH_TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
       onAuthCancelled()
+    } catch (e: NoCredentialException) {
+      Log.w(AUTH_TAG, "No Google accounts available on device: ${e.message}", e)
+      onAuthError("No Google account found on this device. Add a Google account in device settings or use Salesman OTP login.")
     } catch (e: Exception) {
       Log.e(AUTH_TAG, "Google Sign-In failed", e)
       onAuthError(e.localizedMessage ?: "Sign in failed. Please try again.")

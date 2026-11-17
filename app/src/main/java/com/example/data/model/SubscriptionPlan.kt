@@ -56,7 +56,7 @@ enum class SubscriptionTier(
       listOf(
         "1 Main GST Business Profile (Primary Account Only)",
         "Up to 50 Invoices / Month with Standard Print Layout",
-        "Inventory SKU Catalog, Purchase Stock-In & Parties Khata",
+        "Inventory SKU Catalog, Purchase Stock-In & Party Ledger",
         "No Salesman OTP Seats (Owner Login Only)",
         "E-Invoice & E-Way Bill Locked (Upgrade to Diamond)",
       ),

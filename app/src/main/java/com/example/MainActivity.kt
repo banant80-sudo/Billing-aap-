@@ -412,7 +412,7 @@ private fun SalesmanAccessBlockedScreen(
             if (grant != null && !grant.isActive) {
               "Your mobile number (${grant.salesmanName}) is registered, but the Business Owner has temporarily paused your salesman access. As soon as the Owner activates your seat, this screen will unlock automatically."
             } else {
-              "Ask your Business Owner to open Book -> Workspace -> Salesman Team & OTP Access (up to 5 seats), add your mobile number ($phoneNumber), and choose your allowed modules & profiles."
+              "Ask your Business Owner to open Finboss Billing No.1 ERP -> Workspace -> Salesman Team & OTP Access (up to 5 seats), add your mobile number ($phoneNumber), and choose your allowed modules & profiles."
             },
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,

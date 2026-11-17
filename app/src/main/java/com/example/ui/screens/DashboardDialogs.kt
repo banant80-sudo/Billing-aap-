@@ -825,7 +825,7 @@ fun ModuleDetailSheet(
                 style = MaterialTheme.typography.titleSmall,
               )
               Text(
-                text = "Mark this module as queued next in your Book build plan",
+                text = "Mark this module as queued next in your Finboss Billing No.1 ERP build plan",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
@@ -902,7 +902,7 @@ private fun moduleBlueprintFeatures(code: String): List<String> =
     "parties" ->
       listOf(
         "Customer & supplier directory with GSTIN verification",
-        "Running khata ledger balance and credit limit tracking",
+        "Running party ledger balance and credit limit tracking",
         "Pending dues summary and one-tap payment follow-ups",
       )
     "expenses" ->
@@ -1046,7 +1046,7 @@ fun ReceivePaymentDashboardDialog(
                 mode = "party"
                 validationError = null
               },
-              label = { Text("Customer Khata (${customersWithDues.size})") },
+              label = { Text("Customer Ledger (${customersWithDues.size})") },
               modifier = Modifier.testTag("receive_mode_party_chip"),
             )
           }
@@ -1059,7 +1059,7 @@ fun ReceivePaymentDashboardDialog(
                 modifier = Modifier.fillMaxWidth(),
               ) {
                 Text(
-                  text = "All bills are currently paid! Switch to Customer Khata to record an account payment.",
+                  text = "All bills are currently paid! Switch to Customer Ledger to record an account payment.",
                   style = MaterialTheme.typography.bodySmall,
                   modifier = Modifier.padding(12.dp),
                 )
@@ -1127,14 +1127,14 @@ fun ReceivePaymentDashboardDialog(
                 modifier = Modifier.fillMaxWidth(),
               ) {
                 Text(
-                  text = "No customer parties added yet. Add a customer in Parties & Khata first.",
+                  text = "No customer parties added yet. Add a customer in Party Ledger first.",
                   style = MaterialTheme.typography.bodySmall,
                   modifier = Modifier.padding(12.dp),
                 )
               }
             } else {
               Text(
-                text = "Select Customer Khata",
+                text = "Select Customer Ledger",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
@@ -1289,10 +1289,10 @@ fun ReceivePaymentDashboardDialog(
                 val msg =
                   WhatsAppShareHelper.formatPaymentReceiptMessage(
                     payerName = pty.name,
-                    referenceLabel = "Customer Khata Payment",
+                    referenceLabel = "Customer Ledger Payment",
                     amountPaid = parsedAmt,
                     remainingDue = remaining,
-                    paymentMethod = "KHATA",
+                    paymentMethod = "LEDGER",
                     businessName = businessName,
                     currency = currency,
                   )

@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Book"
+rootProject.name = "Finboss ERP"
 
 include(":app")

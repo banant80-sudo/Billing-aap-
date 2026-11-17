@@ -50,7 +50,7 @@ class BookAiViewModel : ViewModel() {
       systemInstruction =
         content {
           text(
-            "You are Book AI, a sharp Indian Chartered Accountant & Business Operations Analyst inside the Book ERP app. " +
+            "You are Finboss AI, a sharp Indian Chartered Accountant & Business Operations Analyst inside the Finboss Billing No.1 ERP app. " +
               "Analyze the live business snapshot provided with each user query (Sales, GST Output/ITC, Party Ledger balances & Profit/Loss %, Inventory stock levels & item margins, Cashbook/Expenses). " +
               "Respond concisely in clear bullet points with exact INR amounts and percentages. " +
               "If the user writes in Hinglish or Hindi, match their language naturally while keeping financial terms clear. " +
@@ -139,7 +139,7 @@ class BookAiViewModel : ViewModel() {
           ),
           "expenseCategory" to Schema.enumeration(
             values = listOf("purchases", "rent", "payroll", "utilities", "transport", "marketing", "tax", "other"),
-            description = "Most relevant Book ERP expense category.",
+            description = "Most relevant Finboss ERP expense category.",
           ),
           "subtotal" to Schema.double(description = "Taxable subtotal before GST/tax."),
           "gstAmount" to Schema.double(description = "Total GST/CGST+SGST/IGST tax amount on bill."),
@@ -184,7 +184,7 @@ class BookAiViewModel : ViewModel() {
           id = "welcome",
           isUser = false,
           text =
-            "Namaste! Main Book AI Analyst hoon. Aap mujhse Sales, Party Ledger Profit/Loss %, Stock alerts, ya GST ITC ke baare me koi bhi sawaal pooch sakte hain.",
+            "Namaste! Main Finboss Billing No.1 ERP AI Analyst hoon. Aap mujhse Sales, Party Ledger Profit/Loss %, Stock alerts, ya GST ITC ke baare me koi bhi sawaal pooch sakte hain.",
         )
       )
     )
@@ -295,7 +295,7 @@ class BookAiViewModel : ViewModel() {
         throw e
       } catch (e: Exception) {
         Log.e(TAG, "Firebase AI chat failed", e)
-        val msg = e.localizedMessage ?: "Failed to connect to Book AI service."
+        val msg = e.localizedMessage ?: "Failed to connect to Finboss AI service."
         updateModelMessage(modelMsgId, msg, isStreaming = false, isError = true)
         _chatUiState.value = AiChatUiState.Error(msg)
       }
@@ -399,7 +399,7 @@ class BookAiViewModel : ViewModel() {
           content {
             inlineData(audioBytes, "audio/mp4")
             text(
-              "Listen carefully to this voice command in English, Hindi, or Hinglish for Book ERP. " +
+              "Listen carefully to this voice command in English, Hindi, or Hinglish for Finboss Billing No.1 ERP. " +
                 "Determine whether the user wants to create a customer INVOICE/bill or record an EXPENSE, and extract every field into JSON.\n" +
                 catalogHint
             )
@@ -440,7 +440,7 @@ class BookAiViewModel : ViewModel() {
         val promptContent =
           content {
             text(
-              "Parse this spoken/dictated command in English, Hindi, or Hinglish for Book ERP into a structured INVOICE or EXPENSE JSON.\n" +
+              "Parse this spoken/dictated command in English, Hindi, or Hinglish for Finboss Billing No.1 ERP into a structured INVOICE or EXPENSE JSON.\n" +
                 "Command: \"$clean\"\n\n$catalogHint"
             )
           }
@@ -487,7 +487,7 @@ class BookAiViewModel : ViewModel() {
           content {
             image(bitmap)
             text(
-              "Perform high-accuracy OCR on this printed or handwritten bill, receipt, or tax invoice photo for Book ERP. " +
+              "Perform high-accuracy OCR on this printed or handwritten bill, receipt, or tax invoice photo for Finboss Billing No.1 ERP. " +
                 "Extract vendor/party name, GSTIN, bill number, date, taxable subtotal, GST tax amount, grand total, and all line items into JSON.\n" +
                 catalogHint
             )

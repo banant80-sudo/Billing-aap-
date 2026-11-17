@@ -102,7 +102,7 @@ fun SubscriptionPlansSheet(
     isOwnerSession: Boolean,
     appSettings: ErpAppSettings = ErpAppSettings(),
     userEmail: String? = null,
-    businessName: String = "Book Enterprise",
+    businessName: String = "Finboss Enterprise",
     isBusy: Boolean = false,
     onActivatePlan: (tier: SubscriptionTier, billingCycle: String, onSuccess: () -> Unit) -> Unit,
     onDismiss: () -> Unit
@@ -213,7 +213,7 @@ fun SubscriptionPlansSheet(
                     }
                     Column {
                         Text(
-                            text = "Book Subscription & Plans",
+                            text = "Finboss Billing No.1 ERP Plans",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.ExtraBold
                         )
@@ -633,7 +633,7 @@ fun SubscriptionPlansSheet(
                 merchantUpiId = merchantUpiId,
                 beneficiaryName = merchantName,
                 amountInr = totalAmount,
-                planNote = "Book ${currentCheckoutTier.displayName} ${checkoutCycle.uppercase()}"
+                planNote = "Finboss ${currentCheckoutTier.displayName} ${checkoutCycle.uppercase()}"
             )
         }
         val upiQrBitmap = remember(upiPaymentUri) {
@@ -1090,7 +1090,7 @@ fun SubscriptionPlansSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Your Book ${receipt.tier.displayName} ($cycleDisplay) plan is now active until ${dateFormat.format(Date(receipt.validUntilMs))}.",
+                        text = "Your Finboss ${receipt.tier.displayName} ($cycleDisplay) plan is now active until ${dateFormat.format(Date(receipt.validUntilMs))}.",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary

@@ -1,145 +1,67 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
 import {
-  getAuth,
-  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   signOut
-} from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/11.14.0/firebase-auth.js";
 import {
   collection,
   doc,
   getDoc,
-  getFirestore,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
-  setDoc,
-  updateDoc,
-  orderBy
-} from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
-import QRCode from "https://esm.sh/qrcode@1.5.4";
+  setDoc
+} from "https://www.gstatic.com/firebasejs/11.14.0/firebase-firestore.js";
+import { ADMIN_RECEIPT_EMAIL } from "./firebase-config.js";
+import { auth, db, googleProvider, PLAN_SPECS, state } from "./state.js";
 import {
-  ADMIN_RECEIPT_EMAIL,
-  FIREBASE_WEB_CONFIG,
-  FIRESTORE_DATABASE_ID,
-  MERCHANT_BENEFICIARY_NAME,
-  MERCHANT_UPI_ID
-} from "./firebase-config.js";
-
-const app = initializeApp(FIREBASE_WEB_CONFIG);
-const auth = getAuth(app);
-const db = getFirestore(app, FIRESTORE_DATABASE_ID);
-const googleProvider = new GoogleAuthProvider();
-
-const PLAN_SPECS = {
-  trial: { name: "30-Day Free Trial", monthly: 0, yearly: 0, maxProfiles: 3, eInvoice: true },
-  silver: { name: "Silver", monthly: 300, yearly: 3600, maxProfiles: 1, eInvoice: false },
-  gold: { name: "Gold", monthly: 500, yearly: 5400, maxProfiles: 2, eInvoice: false },
-  diamond: { name: "Diamond", monthly: 700, yearly: 6720, maxProfiles: 3, eInvoice: true }
-};
-
-const state = {
-  user: null,
-  rootProfile: null,
-  profiles: [],
-  activeProfileId: "main_1",
-  invoices: [],
-  inventory: [],
-  parties: [],
-  expenses: [],
-  ledgerPeriod: "month",
-  ledgerView: "parties",
-  unsubs: []
-};
-
-const $ = (id) => document.getElementById(id);
-
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function inr(value) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 2
-  }).format(Number(value || 0));
-}
-
-function showToast(message) {
-  const banner = $("toast-banner");
-  banner.textContent = message;
-  banner.classList.remove("hidden");
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => banner.classList.add("hidden"), 4500);
-}
-
-function normalizeWaPhone(rawPhone) {
-  const digits = String(rawPhone || "").replace(/\D/g, "");
-  if (digits.length === 10) return `91${digits}`;
-  if (digits.length >= 11 && digits.length <= 15) return digits;
-  return "";
-}
-
-function shareToWhatsApp(text, rawPhone = "") {
-  const phone = normalizeWaPhone(rawPhone);
-  const url = phone
-    ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-    : `https://wa.me/?text=${encodeURIComponent(text)}`;
-  window.open(url, "_blank", "noopener");
-}
-
-function findPartyPhone(partyId, partyName) {
-  const match = profileScoped(state.parties).find(
-    (p) => (partyId && p.id === partyId) || (partyName && String(p.name).toLowerCase() === String(partyName).toLowerCase())
-  );
-  return match?.phone || "";
-}
-
-function activeProfile() {
-  return (
-    state.profiles.find((p) => p.id === state.activeProfileId) ||
-    state.profiles[0] ||
-    state.rootProfile || {
-      id: "main_1",
-      businessName: "Book Enterprise",
-      profileMode: "main_gst",
-      monthlySalesTarget: 250000
-    }
-  );
-}
-
-function isPlainNonGst() {
-  const prof = activeProfile();
-  return prof.id === "plain_1" || prof.profileMode === "plain_non_gst";
-}
-
-function effectivePlanTier() {
-  const rp = state.rootProfile || {};
-  const tier = rp.planTier || "trial";
-  const expires = Number(rp.planExpiresAtMs || 0);
-  if (expires > 0 && Date.now() > expires) return "expired";
-  return tier;
-}
-
-function daysRemaining() {
-  const expires = Number(state.rootProfile?.planExpiresAtMs || 0);
-  if (!expires) return 30;
-  return Math.max(0, Math.ceil((expires - Date.now()) / 86400000));
-}
-
-function profileScoped(list) {
-  const pid = state.activeProfileId || "main_1";
-  return list.filter((docItem) => {
-    const ref = docItem.businessProfileId || "";
-    return ref === pid || (pid === "main_1" && ref === "");
-  });
-}
+  $,
+  activeProfile,
+  closeModal,
+  daysRemaining,
+  effectivePlanTier,
+  escapeHtml,
+  fmtPct,
+  inr,
+  isPlainNonGst,
+  profileScoped,
+  shareToWhatsApp,
+  showToast
+} from "./utils.js";
+import {
+  bindBillingTableEvents,
+  openInvoiceModal,
+  renderBilling,
+  setBillingSubscriptionOpener
+} from "./billing.js";
+import {
+  bindPartyTableEvents,
+  computeLedgerAnalytics,
+  openPartyModal,
+  openQuickEntryModal,
+  printLedgerStatement,
+  renderParties,
+  renderReports
+} from "./ledger.js";
+import {
+  bindExpenseEvents,
+  bindStockTableEvents,
+  openExpenseModal,
+  openItemModal,
+  openPurchaseModal,
+  openReceivePaymentModal,
+  renderExpenses,
+  renderStock
+} from "./stock-expenses.js";
+import {
+  bindWorkspaceEvents,
+  openBusinessProfileModal,
+  openSubscriptionModal,
+  renderWorkspace
+} from "./workspace.js";
+import { bindAiCopilotEvents, renderAiCopilot } from "./ai-copilot.js";
+import { bindGstFilingEvents, renderGstFiling } from "./gst-filing.js";
 
 function clearSubscriptions() {
   state.unsubs.forEach((u) => u && u());
@@ -156,7 +78,7 @@ async function ensureBootstrapWorkspace(user) {
       userId: user.uid,
       ownerName: (user.displayName || "Business Owner").slice(0, 80),
       ownerEmail: (user.email || ADMIN_RECEIPT_EMAIL).slice(0, 150),
-      businessName: `${(user.displayName || "Book").split(" ")[0]} Enterprises`.slice(0, 100),
+      businessName: `${(user.displayName || "Finboss").split(" ")[0]} Enterprises`.slice(0, 100),
       gstin: "",
       address: "",
       state: "Maharashtra",
@@ -198,12 +120,31 @@ async function ensureBootstrapWorkspace(user) {
   }
 }
 
+function updateSyncPill(snap) {
+  const pill = $("sync-pill");
+  if (!pill || !snap) return;
+  if (snap.metadata?.hasPendingWrites) {
+    pill.textContent = "↻ Syncing to Cloud...";
+    pill.style.background = "#FEF3C7";
+    pill.style.color = "#92400E";
+  } else if (snap.metadata?.fromCache) {
+    pill.textContent = "● Cached Offline Mode";
+    pill.style.background = "#E0F2FE";
+    pill.style.color = "#075985";
+  } else {
+    pill.textContent = "● Live Synced";
+    pill.style.background = "#D1FAE5";
+    pill.style.color = "#065F46";
+  }
+}
+
 function startRealtimeSync(uid) {
   clearSubscriptions();
 
   state.unsubs.push(
     onSnapshot(doc(db, "users", uid), (snap) => {
       state.rootProfile = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+      updateSyncPill(snap);
       renderAll();
     })
   );
@@ -213,45 +154,42 @@ function startRealtimeSync(uid) {
       state.profiles = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (state.profiles.length && !state.profiles.some((p) => p.id === state.activeProfileId)) {
         state.activeProfileId = state.profiles[0].id;
+        localStorage.setItem("book_web_active_profile", state.activeProfileId);
       }
       renderAll();
     })
   );
 
-  const subscribeList = (colName, key) => {
-    const q = query(collection(db, "users", uid, colName), orderBy("updatedAt", "desc"));
+  const subscribeList = (colName, key, useOrderBy = true) => {
+    const ref = collection(db, "users", uid, colName);
+    const q = useOrderBy ? query(ref, orderBy("updatedAt", "desc")) : ref;
     state.unsubs.push(
       onSnapshot(
         q,
+        { includeMetadataChanges: true },
         (snap) => {
           state[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          updateSyncPill(snap);
           renderAll();
         },
         () => {
-          onSnapshot(collection(db, "users", uid, colName), (snap) => {
-            state[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            renderAll();
-          });
+          state.unsubs.push(
+            onSnapshot(ref, (snap) => {
+              state[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              renderAll();
+            })
+          );
         }
       )
     );
   };
 
-  subscribeList("invoices", "invoices");
-  subscribeList("inventory_items", "inventory");
-  subscribeList("parties", "parties");
-  subscribeList("expenses", "expenses");
-}
-
-function renderAll() {
-  if (!state.user) return;
-  renderSidebar();
-  renderOverview();
-  renderBilling();
-  renderStock();
-  renderParties();
-  renderExpenses();
-  renderReports();
+  subscribeList("invoices", "invoices", true);
+  subscribeList("inventory_items", "inventory", true);
+  subscribeList("parties", "parties", true);
+  subscribeList("expenses", "expenses", true);
+  subscribeList("dashboard_entries", "dashboardEntries", true);
+  subscribeList("salesmen", "salesmen", false);
 }
 
 function renderSidebar() {
@@ -261,7 +199,10 @@ function renderSidebar() {
   const select = $("profile-select");
   const list = state.profiles.length ? state.profiles : [{ id: "main_1", businessName: "Main GST Business" }];
   select.innerHTML = list
-    .map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === state.activeProfileId ? "selected" : ""}>${escapeHtml(p.businessName)}</option>`)
+    .map(
+      (p) =>
+        `<option value="${escapeHtml(p.id)}" ${p.id === state.activeProfileId ? "selected" : ""}>${escapeHtml(p.businessName)}</option>`
+    )
     .join("");
 
   $("profile-mode-pill").textContent = isPlainNonGst() ? "Plain Non-GST Mode" : "Main GST Mode";
@@ -276,17 +217,24 @@ function renderSidebar() {
 function renderOverview() {
   const invoices = profileScoped(state.invoices);
   const expenses = profileScoped(state.expenses);
+  const quickEntries = profileScoped(state.dashboardEntries);
   const target = Number(activeProfile().monthlySalesTarget || 250000);
 
-  const billed = invoices.reduce((s, i) => s + Number(i.grandTotal || 0), 0);
-  const collected = invoices.reduce((s, i) => s + Number(i.paidAmount || 0), 0);
+  const billed =
+    invoices.reduce((s, i) => s + Number(i.grandTotal || 0), 0) +
+    quickEntries.filter((q) => q.category === "sale").reduce((s, q) => s + Number(q.amount || 0), 0);
+  const collected =
+    invoices.reduce((s, i) => s + Number(i.paidAmount || 0), 0) +
+    quickEntries.filter((q) => q.category === "sale" && q.status === "paid").reduce((s, q) => s + Number(q.amount || 0), 0);
   const pending = Math.max(0, billed - collected);
-  const expTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const expTotal =
+    expenses.reduce((s, e) => s + Number(e.amount || 0), 0) +
+    quickEntries.filter((q) => q.category === "expense").reduce((s, q) => s + Number(q.amount || 0), 0);
   const gstItc = expenses.reduce((s, e) => s + Number(e.gstInputAmount || 0), 0);
   const pct = target > 0 ? Math.min(100, Math.round((billed / target) * 100)) : 0;
 
   $("kpi-total-billed").textContent = inr(billed);
-  $("kpi-invoice-count").textContent = `${invoices.length} invoice(s)`;
+  $("kpi-invoice-count").textContent = `${invoices.length} invoice(s) • ${quickEntries.length} quick`;
   $("kpi-collected").textContent = inr(collected);
   $("kpi-target-text").textContent = `Target ${inr(target)}`;
   $("kpi-receivables").textContent = inr(pending);
@@ -305,7 +253,7 @@ function renderOverview() {
         <td class="mono bold">${escapeHtml(inv.invoiceNumber)}</td>
         <td>${escapeHtml(inv.partyName)}</td>
         <td>${escapeHtml((inv.taxMode || "").toUpperCase())}</td>
-        <td><span class="pill pill-${inv.status === "paid" ? "paid" : inv.status === "partial" ? "partial" : "unpaid"}">${escapeHtml(inv.status.toUpperCase())}</span></td>
+        <td><span class="pill pill-${inv.status === "paid" ? "paid" : inv.status === "partial" ? "partial" : "unpaid"}">${escapeHtml(String(inv.status || "unpaid").toUpperCase())}</span></td>
         <td class="right mono bold">${inr(inv.grandTotal)}</td>
       </tr>`
         )
@@ -313,1024 +261,133 @@ function renderOverview() {
     : `<tr><td colspan="5" class="muted">No invoices yet for this profile. Click "+ Create Invoice" to create one.</td></tr>`;
 }
 
-function renderBilling() {
-  const q = ($("invoice-search").value || "").trim().toLowerCase();
-  const invoices = profileScoped(state.invoices).filter((i) => {
-    if (!q) return true;
-    return [i.invoiceNumber, i.partyName, i.partyGstin, i.irn, i.ewbNumber]
-      .filter(Boolean)
-      .some((v) => String(v).toLowerCase().includes(q));
-  });
-
-  $("billing-invoices-table").innerHTML = invoices.length
-    ? invoices
-        .map((inv) => {
-          const bal = Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0));
-          const comp = [
-            inv.irn ? `<span class="pill pill-info">IRN ✓</span>` : "",
-            inv.ewbNumber ? `<span class="pill pill-paid">EWB ${escapeHtml(inv.ewbNumber)}</span>` : ""
-          ]
-            .filter(Boolean)
-            .join(" ");
-          return `
-        <tr>
-          <td class="mono bold">${escapeHtml(inv.invoiceNumber)}</td>
-          <td>${escapeHtml(inv.partyName)}<br/><span class="muted mono">${escapeHtml(inv.partyGstin || "Unregistered")}</span></td>
-          <td><span class="pill pill-${inv.status === "paid" ? "paid" : inv.status === "partial" ? "partial" : "unpaid"}">${escapeHtml(inv.status.toUpperCase())}</span></td>
-          <td>${comp || `<span class="muted">Standard</span>`}</td>
-          <td class="right mono bold">${inr(inv.grandTotal)}</td>
-          <td class="right mono">${inr(bal)}</td>
-          <td class="right">
-            <button class="btn btn-sm btn-ghost" data-action="print-inv" data-id="${escapeHtml(inv.id)}">Print PDF</button>
-            <button class="btn btn-sm btn-ghost" data-action="wa-inv" data-id="${escapeHtml(inv.id)}">WhatsApp</button>
-            ${bal > 0 ? `<button class="btn btn-sm btn-primary" data-action="mark-paid" data-id="${escapeHtml(inv.id)}">Mark Paid</button>` : ""}
-            ${!isPlainNonGst() && !inv.irn ? `<button class="btn btn-sm btn-secondary" data-action="einvoice" data-id="${escapeHtml(inv.id)}">E-Invoice</button>` : ""}
-            ${!isPlainNonGst() && !inv.ewbNumber ? `<button class="btn btn-sm btn-secondary" data-action="eway" data-id="${escapeHtml(inv.id)}">E-Way Bill</button>` : ""}
-          </td>
-        </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="7" class="muted">No matching invoices found.</td></tr>`;
+export function renderAll() {
+  if (!state.user) return;
+  renderSidebar();
+  renderOverview();
+  renderBilling();
+  renderStock();
+  renderParties();
+  renderExpenses();
+  renderReports();
+  renderGstFiling();
+  renderAiCopilot();
+  renderWorkspace();
 }
 
-function renderStock() {
-  const q = ($("stock-search").value || "").trim().toLowerCase();
-  const items = profileScoped(state.inventory).filter((it) => {
-    if (!q) return true;
-    return [it.name, it.sku, it.hsnCode, it.category].some((v) => String(v || "").toLowerCase().includes(q));
-  });
+state.renderCallback = renderAll;
 
-  $("stock-items-table").innerHTML = items.length
-    ? items
-        .map(
-          (it) => `
-      <tr>
-        <td class="bold">${escapeHtml(it.name)}</td>
-        <td class="mono">${escapeHtml(it.sku)} / HSN ${escapeHtml(it.hsnCode || "—")}</td>
-        <td>${Number(it.gstRatePercent || 0)}%</td>
-        <td class="right mono">${inr(it.salePrice)}</td>
-        <td class="right mono bold">${Number(it.stockQty || 0)} ${escapeHtml(it.unit)}</td>
-        <td class="right">
-          <button class="btn btn-sm btn-ghost" data-action="restock" data-id="${escapeHtml(it.id)}">+ Restock</button>
-          <button class="btn btn-sm btn-ghost" data-action="wa-stock" data-id="${escapeHtml(it.id)}">WhatsApp</button>
-        </td>
-      </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="6" class="muted">No inventory items yet.</td></tr>`;
-}
-
-function toMs(ts) {
-  if (!ts) return Date.now();
-  if (typeof ts.toDate === "function") return ts.toDate().getTime();
-  if (typeof ts.seconds === "number") return ts.seconds * 1000;
-  return Number(ts) || Date.now();
-}
-
-function resolveLedgerRange(period) {
-  if (period === "all") return { startMs: 0, endMs: Number.MAX_SAFE_INTEGER, label: "All Transactions" };
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth(); // 0..11
-  const fyStart = m >= 3 ? y : y - 1;
-  const fmt = (d) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const sod = (yr, mo, dy) => new Date(yr, mo, dy, 0, 0, 0, 0).getTime();
-  const eom = (yr, mo) => new Date(yr, mo + 1, 0, 23, 59, 59, 999).getTime();
-
-  if (period === "month") {
-    const start = sod(y, m, 1);
-    const end = eom(y, m);
-    return { startMs: start, endMs: end, label: new Date(start).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) };
-  }
-  if (period === "quarter") {
-    let q = "Q4", sy = y, sm = 0, em = 2;
-    if (m >= 3 && m <= 5) { q = "Q1"; sm = 3; em = 5; }
-    else if (m >= 6 && m <= 8) { q = "Q2"; sm = 6; em = 8; }
-    else if (m >= 9 && m <= 11) { q = "Q3"; sm = 9; em = 11; }
-    const start = sod(sy, sm, 1), end = eom(sy, em);
-    return { startMs: start, endMs: end, label: `${q} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
-  }
-  if (period === "half_year") {
-    const isH1 = m >= 3 && m <= 8;
-    const start = isH1 ? sod(y, 3, 1) : sod(fyStart, 9, 1);
-    const end = isH1 ? eom(y, 8) : eom(fyStart + 1, 2);
-    return { startMs: start, endMs: end, label: `${isH1 ? "H1" : "H2"} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
-  }
-  if (period === "prev_year") {
-    const py = fyStart - 1;
-    const start = sod(py, 3, 1), end = eom(py + 1, 2);
-    return { startMs: start, endMs: end, label: `FY ${py}-${String((py + 1) % 100).padStart(2, "0")} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
-  }
-  // present_year
-  const start = sod(fyStart, 3, 1), end = eom(fyStart + 1, 2);
-  return { startMs: start, endMs: end, label: `FY ${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")} (${fmt(new Date(start))} – ${fmt(new Date(end))})` };
-}
-
-function fmtPct(pct) {
-  const n = Number(pct || 0);
-  const sign = n > 0.05 ? "+" : n < -0.05 ? "-" : "";
-  return `${sign}${Math.abs(n).toFixed(1)}%`;
-}
-
-function computeProfitPct(profit, cost, rev) {
-  if (cost > 0.0001) return (profit / cost) * 100;
-  if (rev > 0.0001) return (profit / rev) * 100;
-  return 0;
-}
-
-function computeLedgerAnalytics(period) {
-  const range = resolveLedgerRange(period);
-  const inRange = (ts) => ts >= range.startMs && ts <= range.endMs;
-
-  const invList = profileScoped(state.invoices).filter((i) => inRange(toMs(i.createdAt)));
-  const expList = profileScoped(state.expenses).filter((e) => inRange(toMs(e.createdAt)));
-  const stockList = profileScoped(state.inventory);
-  const partyList = profileScoped(state.parties);
-
-  const byId = new Map(stockList.map((s) => [s.id, s]));
-  const bySku = new Map(stockList.filter((s) => s.sku).map((s) => [String(s.sku).toLowerCase(), s]));
-  const byName = new Map(stockList.filter((s) => s.name).map((s) => [String(s.name).trim().toLowerCase(), s]));
-  const findStock = (l) => (l.itemId && byId.get(l.itemId)) || (l.sku && bySku.get(String(l.sku).toLowerCase())) || byName.get(String(l.name || "").trim().toLowerCase());
-
-  const itemAcc = new Map();
-  stockList.forEach((s) => itemAcc.set(s.id, { item: s, name: s.name, sku: s.sku, unit: s.unit || "PCS", stockQty: Number(s.stockQty || 0), stockVal: Number(s.stockQty || 0) * Number(s.purchasePrice || 0), soldQty: 0, sales: 0, cost: 0 }));
-
-  const partyAcc = new Map();
-  partyList.forEach((p) => partyAcc.set(p.id, { party: p, name: p.name, type: p.partyType || "customer", phone: p.phone || "", gstin: p.gstin || "", due: Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0)), txCount: 0, sales: 0, cost: 0 }));
-
-  const partyByName = new Map(partyList.map((p) => [String(p.name || "").trim().toLowerCase(), p]));
-  const txRows = [];
-  let totalSales = 0, totalCost = 0;
-
-  invList.forEach((inv) => {
-    const rawSub = Number(inv.subtotal || 0) || (inv.lineItems || []).reduce((s, l) => s + Number(l.taxableAmount || l.qty * l.unitPrice || 0), 0);
-    const netRev = Math.max(0, rawSub - Number(inv.discountAmount || 0));
-    const factor = rawSub > 0.0001 ? netRev / rawSub : 1;
-    let invCost = 0;
-    (inv.lineItems || []).forEach((l) => {
-      const st = findStock(l);
-      const unitCost = Number(st?.purchasePrice || 0);
-      const lRev = Number(l.taxableAmount || l.qty * l.unitPrice || 0) * factor;
-      const lCost = Number(l.qty || 0) * unitCost;
-      invCost += lCost;
-      const k = st ? st.id : `name:${String(l.name || "").trim().toLowerCase()}`;
-      if (!itemAcc.has(k)) itemAcc.set(k, { item: st, name: l.name, sku: l.sku || "", unit: l.unit || "PCS", stockQty: 0, stockVal: 0, soldQty: 0, sales: 0, cost: 0 });
-      const ia = itemAcc.get(k);
-      ia.soldQty += Number(l.qty || 0);
-      ia.sales += lRev;
-      ia.cost += lCost;
-    });
-    const invProfit = netRev - invCost;
-    const invPct = computeProfitPct(invProfit, invCost, netRev);
-    totalSales += netRev;
-    totalCost += invCost;
-
-    const matchedP = (inv.partyId && partyAcc.get(inv.partyId)?.party) || partyByName.get(String(inv.partyName || "").trim().toLowerCase());
-    const pk = matchedP ? matchedP.id : `walkin:${String(inv.partyName || "").trim().toLowerCase()}`;
-    if (!partyAcc.has(pk)) partyAcc.set(pk, { party: matchedP, name: inv.partyName || "Walk-in", type: "customer", phone: "", gstin: inv.partyGstin || "", due: Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0)), txCount: 0, sales: 0, cost: 0 });
-    const pa = partyAcc.get(pk);
-    pa.txCount += 1;
-    pa.sales += netRev;
-    pa.cost += invCost;
-
-    txRows.push({
-      ts: toMs(inv.createdAt),
-      type: isPlainNonGst() ? "BILL" : "SALE",
-      ref: inv.invoiceNumber,
-      party: inv.partyName,
-      items: (inv.lineItems || []).map((l) => `${l.name} (${l.qty})`).join(", "),
-      amount: Number(inv.grandTotal || 0),
-      profit: invProfit,
-      pct: invPct
-    });
-  });
-
-  let totalExpenses = 0;
-  expList.forEach((e) => {
-    totalExpenses += Number(e.amount || 0);
-    txRows.push({
-      ts: toMs(e.createdAt),
-      type: e.category === "purchases" ? "PURCHASE" : "EXPENSE",
-      ref: e.referenceNo || e.category || "EXP",
-      party: e.partyName || e.title,
-      items: e.title,
-      amount: Number(e.amount || 0),
-      profit: null,
-      pct: null
-    });
-  });
-
-  const netProfit = totalCost > 0 ? totalSales - totalCost : totalSales - totalExpenses;
-  const netPct = computeProfitPct(netProfit, totalCost > 0 ? totalCost : totalExpenses, totalSales);
-  const stockValue = stockList.reduce((s, it) => s + Number(it.stockQty || 0) * Number(it.purchasePrice || 0), 0);
-
-  return {
-    period,
-    rangeLabel: range.label,
-    totalSales,
-    totalCost,
-    totalExpenses,
-    netProfit,
-    netPct,
-    stockValue,
-    invoices: invList,
-    expenses: expList,
-    parties: Array.from(partyAcc.values()).map((p) => {
-      const profit = p.sales - p.cost;
-      return { ...p, profit, pct: computeProfitPct(profit, p.cost, p.sales), hasSales: p.sales > 0 || p.cost > 0 };
-    }),
-    items: Array.from(itemAcc.values()).map((it) => {
-      const profit = it.sales - it.cost;
-      return { ...it, profit, pct: it.soldQty > 0 ? computeProfitPct(profit, it.cost, it.sales) : 0, hasSold: it.soldQty > 0 };
-    }),
-    transactions: txRows.sort((a, b) => b.ts - a.ts)
-  };
-}
-
-function renderParties() {
-  const q = ($("party-search").value || "").trim().toLowerCase();
-  const analytics = computeLedgerAnalytics(state.ledgerPeriod);
-  $("ledger-range-label").textContent = analytics.rangeLabel;
-  const plBadge = `<span class="pill ${analytics.netProfit >= 0 ? "pill-profit" : "pill-loss"}">${analytics.netProfit >= 0 ? "Profit" : "Loss"} ${fmtPct(analytics.netPct)}</span>`;
-  $("ledger-kpi-strip").innerHTML = `
-    <div class="kpi-card"><div class="kpi-label">Period Sales</div><div class="kpi-value mono">${inr(analytics.totalSales)}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Net Profit / Loss</div><div class="kpi-value mono ${analytics.netProfit >= 0 ? "text-profit" : "text-loss"}">${inr(analytics.netProfit)}</div><div>${plBadge}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Stock Valuation</div><div class="kpi-value mono">${inr(analytics.stockValue)}</div></div>
-  `;
-
-  $("ledger-parties-wrap").classList.toggle("hidden", state.ledgerView !== "parties");
-  $("ledger-items-wrap").classList.toggle("hidden", state.ledgerView !== "items");
-  $("ledger-tx-wrap").classList.toggle("hidden", state.ledgerView !== "transactions");
-
-  const partyRows = analytics.parties.filter((p) => !q || [p.name, p.phone, p.gstin].some((v) => String(v || "").toLowerCase().includes(q)));
-  $("parties-table").innerHTML = partyRows.length
-    ? partyRows
-        .map((p) => {
-          const plCell = p.hasSales
-            ? `<span class="pill ${p.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(p.profit)} (${fmtPct(p.pct)})</span>`
-            : `<span class="muted">—</span>`;
-          return `
-        <tr>
-          <td class="bold">${escapeHtml(p.name)}</td>
-          <td>${escapeHtml(String(p.type || "customer").toUpperCase())}</td>
-          <td class="mono">${escapeHtml(p.phone || "—")}<br/><span class="muted">${escapeHtml(p.gstin || "")}</span></td>
-          <td class="right mono">${inr(p.sales)}</td>
-          <td class="right">${plCell}</td>
-          <td class="right mono bold">${inr(p.due)}</td>
-          <td class="right">${p.party ? `<button class="btn btn-sm btn-ghost" data-action="wa-party" data-id="${escapeHtml(p.party.id)}">WhatsApp</button>` : ""}</td>
-        </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="7" class="muted">No parties yet.</td></tr>`;
-
-  const itemRows = analytics.items.filter((it) => !q || [it.name, it.sku].some((v) => String(v || "").toLowerCase().includes(q)));
-  $("ledger-items-table").innerHTML = itemRows.length
-    ? itemRows
-        .map((it) => {
-          const plCell = it.hasSold
-            ? `<span class="pill ${it.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(it.profit)} (${fmtPct(it.pct)})</span>`
-            : `<span class="muted">No Sales</span>`;
-          return `
-        <tr>
-          <td class="bold">${escapeHtml(it.name)}<br/><span class="muted mono">${escapeHtml(it.sku || "")}</span></td>
-          <td class="right mono">${it.stockQty} ${escapeHtml(it.unit)}</td>
-          <td class="right mono">${inr(it.stockVal)}</td>
-          <td class="right mono">${it.soldQty}</td>
-          <td class="right mono">${inr(it.sales)}</td>
-          <td class="right mono">${inr(it.cost)}</td>
-          <td class="right">${plCell}</td>
-        </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="7" class="muted">No items yet.</td></tr>`;
-
-  const txFiltered = analytics.transactions.filter((t) => !q || [t.party, t.items, t.ref, t.type].some((v) => String(v || "").toLowerCase().includes(q)));
-  $("ledger-tx-table").innerHTML = txFiltered.length
-    ? txFiltered
-        .map((t) => {
-          const plCell = t.profit !== null
-            ? `<span class="pill ${t.profit >= 0 ? "pill-profit" : "pill-loss"}">${inr(t.profit)} (${fmtPct(t.pct)})</span>`
-            : `<span class="muted">—</span>`;
-          return `
-        <tr>
-          <td class="mono">${new Date(t.ts).toLocaleDateString("en-IN")}</td>
-          <td><span class="pill pill-info">${escapeHtml(t.type)}</span> <span class="mono bold">${escapeHtml(t.ref)}</span></td>
-          <td><strong>${escapeHtml(t.party)}</strong> — ${escapeHtml(t.items)}</td>
-          <td class="right mono bold">${inr(t.amount)}</td>
-          <td class="right">${plCell}</td>
-        </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="5" class="muted">No transactions in ${escapeHtml(analytics.rangeLabel)}.</td></tr>`;
-}
-
-function renderExpenses() {
-  const list = profileScoped(state.expenses);
-  $("expenses-table").innerHTML = list.length
-    ? list
-        .map(
-          (e) => `
-      <tr>
-        <td class="bold">${escapeHtml(e.title)}</td>
-        <td>${escapeHtml((e.category || "").toUpperCase())}</td>
-        <td>${escapeHtml(e.partyName || e.referenceNo || "—")}</td>
-        <td>${escapeHtml((e.paymentMethod || "").toUpperCase())}</td>
-        <td><span class="pill pill-${e.status === "settled" ? "paid" : "partial"}">${escapeHtml(e.status.toUpperCase())}</span></td>
-        <td class="right mono bold">${inr(e.amount)}</td>
-        <td class="right"><button class="btn btn-sm btn-ghost" data-action="wa-exp" data-id="${escapeHtml(e.id)}">WhatsApp</button></td>
-      </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="7" class="muted">No expenses logged yet.</td></tr>`;
-}
-
-function renderReports() {
-  const analytics = computeLedgerAnalytics(state.ledgerPeriod);
-  $("reports-range-label").textContent = analytics.rangeLabel;
-  const invoices = analytics.invoices;
-  const expenses = analytics.expenses;
-  const taxable = invoices.reduce((s, i) => s + Number(i.subtotal || 0), 0);
-  const outGst = invoices.reduce((s, i) => s + Number(i.gstTotal || 0), 0);
-  const inGst = expenses.reduce((s, e) => s + Number(e.gstInputAmount || 0), 0);
-  const netGst = Math.max(0, outGst - inGst);
-  const totalExp = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const profit = analytics.netProfit;
-
-  $("rep-taxable-sales").textContent = inr(taxable);
-  $("rep-output-gst").textContent = inr(outGst);
-  $("rep-input-gst").textContent = inr(inGst);
-  $("rep-net-gst").textContent = inr(netGst);
-
-  $("rep-pl-summary").innerHTML = `
-    <div class="kpi-card"><div class="kpi-label">Total Tax Invoices</div><div class="kpi-value mono">${invoices.length}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Gross Revenue (Incl. GST)</div><div class="kpi-value mono">${inr(taxable + outGst)}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Net Profit / Loss</div><div class="kpi-value mono ${profit >= 0 ? "text-profit" : "text-loss"}">${inr(profit)} (${fmtPct(analytics.netPct)})</div></div>
-  `;
-}
-
-function printLedgerStatement() {
-  const prof = activeProfile();
-  const a = computeLedgerAnalytics(state.ledgerPeriod);
-  const partyRows = a.parties.map((p) => `<tr><td>${escapeHtml(p.name)}</td><td class="right mono">${inr(p.sales)}</td><td class="right mono" style="color:${p.profit >= 0 ? "#15803D" : "#DC2626"}">${p.hasSales ? `${inr(p.profit)} (${fmtPct(p.pct)})` : "—"}</td><td class="right mono">${inr(p.due)}</td></tr>`).join("");
-  const itemRows = a.items.map((it) => `<tr><td>${escapeHtml(it.name)}</td><td class="right mono">${it.stockQty} ${escapeHtml(it.unit)}</td><td class="right mono">${it.soldQty}</td><td class="right mono">${inr(it.sales)}</td><td class="right mono" style="color:${it.profit >= 0 ? "#15803D" : "#DC2626"}">${it.hasSold ? `${inr(it.profit)} (${fmtPct(it.pct)})` : "—"}</td></tr>`).join("");
-  const txRows = a.transactions.map((t) => `<tr><td class="mono">${new Date(t.ts).toLocaleDateString("en-IN")}</td><td>${escapeHtml(t.type)} ${escapeHtml(t.ref)}</td><td>${escapeHtml(t.party)} — ${escapeHtml(t.items)}</td><td class="right mono">${inr(t.amount)}</td><td class="right mono" style="color:${(t.profit ?? 0) >= 0 ? "#15803D" : "#DC2626"}">${t.pct !== null ? fmtPct(t.pct) : "—"}</td></tr>`).join("");
-
-  $("print-sheet").innerHTML = `
-    <div style="border:1px solid #334155;padding:20px;font-size:12px;">
-      <div style="border-bottom:2px solid #0B253C;padding-bottom:10px;margin-bottom:12px;">
-        <h2 style="margin:0;">${escapeHtml(prof.businessName || "Book")} — Ledger &amp; P&amp;L Statement</h2>
-        <div>Period: ${escapeHtml(a.rangeLabel)} • Net P&amp;L: <strong style="color:${a.netProfit >= 0 ? "#15803D" : "#DC2626"}">${inr(a.netProfit)} (${fmtPct(a.netPct)})</strong> • Stock Value: ${inr(a.stockValue)}</div>
-      </div>
-      <h4>Party-Wise Profit / Loss (%)</h4>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><thead><tr><th>Party</th><th class="right">Sales</th><th class="right">Profit / Loss</th><th class="right">Due</th></tr></thead><tbody>${partyRows}</tbody></table>
-      <h4>Item &amp; Stock Profit / Loss (%)</h4>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><thead><tr><th>Item</th><th class="right">Stock</th><th class="right">Sold</th><th class="right">Sales</th><th class="right">Profit / Loss</th></tr></thead><tbody>${itemRows}</tbody></table>
-      <h4>Transactions (${a.transactions.length})</h4>
-      <table style="width:100%;border-collapse:collapse;"><thead><tr><th>Date</th><th>Voucher</th><th>Party &amp; Items</th><th class="right">Amount</th><th class="right">P&amp;L %</th></tr></thead><tbody>${txRows}</tbody></table>
-    </div>
-  `;
-  window.print();
-}
-
-function openModal(html) {
-  $("modal-container").innerHTML = html;
-  $("modal-backdrop").classList.remove("hidden");
-}
-
-function closeModal() {
-  $("modal-backdrop").classList.add("hidden");
-  $("modal-container").innerHTML = "";
-}
-
-function openReceivePaymentModal() {
-  const pendingInvoices = profileScoped(state.invoices).filter(
-    (inv) => inv.status !== "paid" && Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0) > 0
-  );
-  const customers = profileScoped(state.parties).filter((p) => (p.partyType || "customer") === "customer");
-  let mode = pendingInvoices.length > 0 ? "invoice" : "party";
-
-  const renderForm = () => {
-    const invOptions = pendingInvoices
-      .map((inv) => {
-        const due = Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0));
-        return `<option value="${escapeHtml(inv.id)}" data-due="${due}">${escapeHtml(inv.invoiceNumber)} • ${escapeHtml(inv.partyName)} (Due ${inr(due)})</option>`;
-      })
-      .join("");
-    const partyOptions = customers
-      .map((p) => {
-        const due = Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0));
-        return `<option value="${escapeHtml(p.id)}" data-due="${due}">${escapeHtml(p.name)} (Due ${inr(due)})</option>`;
-      })
-      .join("");
-
-    const defaultDue =
-      mode === "invoice"
-        ? pendingInvoices[0]
-          ? Math.max(0, Number(pendingInvoices[0].grandTotal || 0) - Number(pendingInvoices[0].paidAmount || 0))
-          : 0
-        : customers[0]
-          ? Math.max(0, Number(customers[0].openingDue || 0) + Number(customers[0].totalBilled || 0) - Number(customers[0].totalPaid || 0))
-          : 0;
-
-    openModal(`
-      <h3>Receive Payment</h3>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button id="rp-mode-inv" class="btn ${mode === "invoice" ? "btn-primary" : "btn-ghost"}">Pending Bills (${pendingInvoices.length})</button>
-        <button id="rp-mode-pty" class="btn ${mode === "party" ? "btn-primary" : "btn-ghost"}">Customer Khata (${customers.length})</button>
-      </div>
-      <div class="form-grid">
-        ${
-          mode === "invoice"
-            ? `<div class="form-field span-2"><label>Select Pending Invoice</label><select id="rp-target" class="input-select">${invOptions || `<option value="">No pending invoices</option>`}</select></div>`
-            : `<div class="form-field span-2"><label>Select Customer</label><select id="rp-target" class="input-select">${partyOptions || `<option value="">No customers found</option>`}</select></div>`
-        }
-        <div class="form-field"><label>Amount Received (₹)</label><input id="rp-amount" type="number" class="input-text" value="${defaultDue > 0 ? defaultDue : ""}" min="1" /></div>
-        <div class="form-field"><label>Payment Mode</label><select id="rp-method" class="input-select">
-          <option value="upi">UPI</option><option value="cash">Cash</option><option value="card">Card</option>
-        </select></div>
-      </div>
-      <p id="m-err" class="error-box hidden"></p>
-      <div class="modal-actions">
-        <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-        <button id="rp-save" class="btn btn-primary">Save Payment</button>
-      </div>
-    `);
-
-    $("m-cancel").onclick = closeModal;
-    $("rp-mode-inv").onclick = () => { mode = "invoice"; renderForm(); };
-    $("rp-mode-pty").onclick = () => { mode = "party"; renderForm(); };
-    $("rp-target").onchange = (e) => {
-      const opt = e.target.selectedOptions[0];
-      if (opt && opt.dataset.due) $("rp-amount").value = opt.dataset.due;
-    };
-    $("rp-save").onclick = async () => {
-      const targetId = $("rp-target").value;
-      const amt = Number($("rp-amount").value || 0);
-      const method = $("rp-method").value;
-      if (!targetId || amt <= 0) {
-        $("m-err").textContent = "Please select a record and enter an amount greater than 0.";
-        $("m-err").classList.remove("hidden");
-        return;
-      }
-
-      const bizName = activeProfile().businessName || "Book";
-      let payerName = "";
-      let payerPhone = "";
-      let refLabel = "";
-      let remaining = 0;
-
-      if (mode === "invoice") {
-        const inv = pendingInvoices.find((i) => i.id === targetId);
-        if (!inv) return;
-        const grand = Number(inv.grandTotal || 0);
-        const alreadyPaid = Number(inv.paidAmount || 0);
-        const applied = Math.min(amt, Math.max(0, grand - alreadyPaid));
-        const newPaid = Math.min(grand, alreadyPaid + applied);
-        const newStatus = newPaid + 0.01 >= grand ? "paid" : "partial";
-        await updateDoc(doc(db, "users", state.user.uid, "invoices", inv.id), {
-          paidAmount: newPaid,
-          status: newStatus,
-          paymentMethod: method,
-          updatedAt: serverTimestamp()
-        });
-        if (inv.partyId) {
-          const pty = state.parties.find((p) => p.id === inv.partyId);
-          if (pty) {
-            await updateDoc(doc(db, "users", state.user.uid, "parties", pty.id), {
-              totalBilled: Number(pty.totalBilled || 0),
-              totalPaid: Number(pty.totalPaid || 0) + applied,
-              updatedAt: serverTimestamp()
-            });
-          }
-        }
-        payerName = inv.partyName;
-        payerPhone = findPartyPhone(inv.partyId, inv.partyName);
-        refLabel = `Invoice ${inv.invoiceNumber}`;
-        remaining = Math.max(0, grand - newPaid);
-      } else {
-        const pty = customers.find((p) => p.id === targetId);
-        if (!pty) return;
-        await updateDoc(doc(db, "users", state.user.uid, "parties", pty.id), {
-          totalBilled: Number(pty.totalBilled || 0),
-          totalPaid: Number(pty.totalPaid || 0) + amt,
-          updatedAt: serverTimestamp()
-        });
-        payerName = pty.name;
-        payerPhone = pty.phone || "";
-        refLabel = "Customer Khata Payment";
-        const currentDue = Math.max(0, Number(pty.openingDue || 0) + Number(pty.totalBilled || 0) - Number(pty.totalPaid || 0));
-        remaining = Math.max(0, currentDue - amt);
-      }
-
-      const receiptText = [
-        `*Payment Receipt • ${bizName}*`,
-        `Received From: *${payerName}*`,
-        `Reference: ${refLabel}`,
-        `Amount Received: *${inr(amt)}* (${method.toUpperCase()})`,
-        `Remaining Balance: ${inr(remaining)}`,
-        `Thank you for your payment!`,
-        `_Book_`
-      ].join("\n");
-
-      openModal(`
-        <h3>Payment Recorded!</h3>
-        <div class="qr-checkout-box" style="text-align:left;justify-items:start;">
-          <div class="bold">${escapeHtml(payerName)} • ${escapeHtml(refLabel)}</div>
-          <div>Received: <strong class="text-emerald">${inr(amt)}</strong> (${escapeHtml(method.toUpperCase())})</div>
-          <div>Remaining Balance: <strong>${inr(remaining)}</strong></div>
-        </div>
-        <div class="modal-actions">
-          <button id="m-done" class="btn btn-ghost">Done</button>
-          <button id="rp-wa" class="btn btn-primary">Share Receipt on WhatsApp</button>
-        </div>
-      `);
-      $("m-done").onclick = closeModal;
-      $("rp-wa").onclick = () => shareToWhatsApp(receiptText, payerPhone);
-      showToast(`Recorded ${inr(amt)} payment from ${payerName}!`);
-    };
-  };
-
-  renderForm();
-}
-
-function openCreateInvoiceModal() {
-  const plain = isPlainNonGst();
-  const invNum = `BK-WEB-${String(Date.now()).slice(-6)}`;
-  const partyOptions = profileScoped(state.parties)
-    .map((p) => `<option value="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" data-gstin="${escapeHtml(p.gstin || "")}">${escapeHtml(p.name)}</option>`)
-    .join("");
-
-  openModal(`
-    <h3>Create New ${plain ? "Plain Bill" : "GST Tax Invoice"}</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>Invoice Number</label><input id="m-inv-num" class="input-text" value="${invNum}" /></div>
-      <div class="form-field"><label>Saved Party (Optional)</label><select id="m-inv-party-sel" class="input-select"><option value="">Walk-in / Custom Customer</option>${partyOptions}</select></div>
-      <div class="form-field"><label>Customer Name *</label><input id="m-inv-party" class="input-text" placeholder="Customer Name" /></div>
-      <div class="form-field"><label>Customer GSTIN</label><input id="m-inv-gstin" class="input-text" ${plain ? "disabled" : ""} placeholder="${plain ? "Disabled in Plain mode" : "27ABCDE1234F1Z5"}" /></div>
-      <div class="form-field span-2"><label>Item / Service Description *</label><input id="m-inv-item" class="input-text" placeholder="e.g. Wholesale Carton Box" /></div>
-      <div class="form-field"><label>Qty</label><input id="m-inv-qty" type="number" class="input-text" value="1" min="1" /></div>
-      <div class="form-field"><label>Unit Rate (₹)</label><input id="m-inv-rate" type="number" class="input-text" placeholder="1000" min="1" /></div>
-      <div class="form-field"><label>GST %</label><select id="m-inv-gst" class="input-select" ${plain ? "disabled" : ""}>
-        <option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option>
-      </select></div>
-      <div class="form-field"><label>Payment Status</label><select id="m-inv-pay" class="input-select">
-        <option value="upi">UPI (Paid)</option><option value="cash">Cash (Paid)</option><option value="credit">Credit (Unpaid)</option>
-      </select></div>
-    </div>
-    <p id="m-err" class="error-box hidden"></p>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Save Invoice</button>
-    </div>
-  `);
-
-  $("m-cancel").onclick = closeModal;
-  $("m-inv-party-sel").onchange = (e) => {
-    const opt = e.target.selectedOptions[0];
-    if (opt && opt.value) {
-      $("m-inv-party").value = opt.dataset.name || "";
-      if (!plain) $("m-inv-gstin").value = opt.dataset.gstin || "";
-    }
-  };
-  $("m-save").onclick = async () => {
-    const num = $("m-inv-num").value.trim().slice(0, 40);
-    const partyName = $("m-inv-party").value.trim().slice(0, 100);
-    const partyGstin = plain ? "" : $("m-inv-gstin").value.trim().toUpperCase().slice(0, 30);
-    const itemName = $("m-inv-item").value.trim().slice(0, 80);
-    const qty = Number($("m-inv-qty").value || 0);
-    const rate = Number($("m-inv-rate").value || 0);
-    const gstPct = plain ? 0 : Number($("m-inv-gst").value || 0);
-    const payMethod = $("m-inv-pay").value;
-
-    if (!num || !partyName || !itemName || qty <= 0 || rate <= 0) {
-      $("m-err").textContent = "Please fill Invoice #, Customer Name, Item, Qty (>0), and Rate (>0).";
-      $("m-err").classList.remove("hidden");
-      return;
-    }
-
-    const subtotal = Math.round(qty * rate * 100) / 100;
-    const gstTotal = Math.round(subtotal * (gstPct / 100) * 100) / 100;
-    const grandTotal = Math.round((subtotal + gstTotal) * 100) / 100;
-    const isCredit = payMethod === "credit";
-    const id = `inv_${Date.now()}`;
-
-    await setDoc(doc(db, "users", state.user.uid, "invoices", id), {
-      userId: state.user.uid,
-      businessProfileId: state.activeProfileId || "main_1",
-      invoiceNumber: num,
-      partyId: $("m-inv-party-sel").value || "",
-      partyName,
-      partyGstin,
-      partyAddress: "",
-      partyState: activeProfile().state || "Maharashtra",
-      partyPincode: "",
-      invoiceType: "tax_invoice",
-      taxMode: plain ? "none" : "cgst_sgst",
-      paymentMethod: payMethod,
-      status: isCredit ? "unpaid" : "paid",
-      subtotal,
-      gstTotal,
-      discountAmount: 0,
-      grandTotal,
-      paidAmount: isCredit ? 0 : grandTotal,
-      notes: "Created via Book Desktop Web",
-      lineItems: [
-        {
-          itemId: "",
-          name: itemName,
-          sku: "",
-          hsnCode: plain ? "" : "9983",
-          unit: "PCS",
-          qty,
-          unitPrice: rate,
-          gstRatePercent: gstPct,
-          taxableAmount: subtotal,
-          gstAmount: gstTotal,
-          lineTotal: grandTotal
-        }
-      ],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast(`Invoice ${num} (${inr(grandTotal)}) synced to cloud!`);
-  };
-}
-
-function openAddItemModal() {
-  openModal(`
-    <h3>Add Stock SKU</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>Product Name *</label><input id="m-sku-name" class="input-text" /></div>
-      <div class="form-field"><label>SKU Code *</label><input id="m-sku-code" class="input-text" value="SKU-${String(Date.now()).slice(-4)}" /></div>
-      <div class="form-field"><label>HSN Code</label><input id="m-sku-hsn" class="input-text" value="8471" /></div>
-      <div class="form-field"><label>Opening Qty</label><input id="m-sku-qty" type="number" class="input-text" value="10" /></div>
-      <div class="form-field"><label>Sale Price (₹)</label><input id="m-sku-sale" type="number" class="input-text" value="500" /></div>
-      <div class="form-field"><label>Purchase Price (₹)</label><input id="m-sku-buy" type="number" class="input-text" value="350" /></div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Save SKU</button>
-    </div>
-  `);
-  $("m-cancel").onclick = closeModal;
-  $("m-save").onclick = async () => {
-    const name = $("m-sku-name").value.trim().slice(0, 100);
-    const sku = $("m-sku-code").value.trim().slice(0, 40);
-    if (!name || !sku) return;
-    await setDoc(doc(db, "users", state.user.uid, "inventory_items", `sku_${Date.now()}`), {
-      userId: state.user.uid,
-      businessProfileId: state.activeProfileId || "main_1",
-      name,
-      sku,
-      hsnCode: $("m-sku-hsn").value.trim().slice(0, 16),
-      category: "General",
-      unit: "PCS",
-      salePrice: Number($("m-sku-sale").value || 0),
-      purchasePrice: Number($("m-sku-buy").value || 0),
-      gstRatePercent: 18,
-      stockQty: Number($("m-sku-qty").value || 0),
-      lowStockThreshold: 5,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast(`Added ${name} to stock!`);
-  };
-}
-
-function openAddPartyModal() {
-  openModal(`
-    <h3>Add Customer / Supplier</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>Party Name *</label><input id="m-p-name" class="input-text" /></div>
-      <div class="form-field"><label>Type</label><select id="m-p-type" class="input-select"><option value="customer">Customer</option><option value="supplier">Supplier</option></select></div>
-      <div class="form-field"><label>Phone</label><input id="m-p-phone" class="input-text" /></div>
-      <div class="form-field"><label>GSTIN</label><input id="m-p-gstin" class="input-text" /></div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Save Party</button>
-    </div>
-  `);
-  $("m-cancel").onclick = closeModal;
-  $("m-save").onclick = async () => {
-    const name = $("m-p-name").value.trim().slice(0, 100);
-    if (!name) return;
-    await setDoc(doc(db, "users", state.user.uid, "parties", `pty_${Date.now()}`), {
-      userId: state.user.uid,
-      businessProfileId: state.activeProfileId || "main_1",
-      name,
-      partyType: $("m-p-type").value,
-      phone: $("m-p-phone").value.trim().slice(0, 25),
-      gstin: $("m-p-gstin").value.trim().toUpperCase().slice(0, 30),
-      address: "",
-      state: activeProfile().state || "Maharashtra",
-      pincode: "",
-      openingDue: 0,
-      totalBilled: 0,
-      totalPaid: 0,
-      creditLimit: 50000,
-      notes: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast(`Added party ${name}!`);
-  };
-}
-
-function openAddExpenseModal() {
-  openModal(`
-    <h3>Record Expense</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>Title *</label><input id="m-e-title" class="input-text" placeholder="Office Rent / Courier" /></div>
-      <div class="form-field"><label>Category</label><select id="m-e-cat" class="input-select"><option value="other">Other</option><option value="purchases">Purchases</option><option value="rent">Rent</option><option value="transport">Transport</option><option value="utilities">Utilities</option></select></div>
-      <div class="form-field"><label>Amount (₹) *</label><input id="m-e-amt" type="number" class="input-text" placeholder="1200" min="1" /></div>
-      <div class="form-field"><label>GST Input Credit (₹)</label><input id="m-e-gst" type="number" class="input-text" value="0" min="0" /></div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Save Expense</button>
-    </div>
-  `);
-  $("m-cancel").onclick = closeModal;
-  $("m-save").onclick = async () => {
-    const title = $("m-e-title").value.trim().slice(0, 100);
-    const amount = Number($("m-e-amt").value || 0);
-    const gstInput = Math.min(amount, Number($("m-e-gst").value || 0));
-    if (!title || amount <= 0) return;
-    await setDoc(doc(db, "users", state.user.uid, "expenses", `exp_${Date.now()}`), {
-      userId: state.user.uid,
-      businessProfileId: state.activeProfileId || "main_1",
-      title,
-      category: $("m-e-cat").value,
-      paymentMethod: "upi",
-      status: "settled",
-      partyId: "",
-      partyName: "",
-      referenceNo: `WEB-${String(Date.now()).slice(-6)}`,
-      amount,
-      gstInputAmount: gstInput,
-      notes: "Logged from Desktop Web",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast(`Recorded expense ${title}!`);
-  };
-}
-
-function openSubscriptionModal() {
-  let cycle = "yearly";
-  const renderPlans = () => {
-    openModal(`
-      <h3>Book Subscription &amp; Plans</h3>
-      <p class="muted">30-Day Free Trial active for new workspaces. Zero bank account or IFSC numbers displayed.</p>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button id="sub-cyc-m" class="btn ${cycle === "monthly" ? "btn-primary" : "btn-ghost"}">Monthly</button>
-        <button id="sub-cyc-y" class="btn ${cycle === "yearly" ? "btn-primary" : "btn-ghost"}">Yearly (Save 10%-20%)</button>
-      </div>
-      <div class="plans-grid">
-        ${["silver", "gold", "diamond"]
-          .map((t) => {
-            const p = PLAN_SPECS[t];
-            const amt = cycle === "yearly" ? p.yearly : p.monthly;
-            return `
-            <div class="plan-option">
-              <div class="bold">${p.name}</div>
-              <div class="kpi-value mono">${inr(amt)}</div>
-              <div class="muted">${cycle === "yearly" ? "per year" : "per month"} • ${p.maxProfiles} profile(s)</div>
-              <div class="muted">${p.eInvoice ? "Includes E-Invoice &amp; E-Way Bill" : "Standard Billing"}</div>
-              <button class="btn btn-primary" data-sub-tier="${t}">Subscribe (${inr(amt)})</button>
-            </div>`;
-          })
-          .join("")}
-      </div>
-      <div class="modal-actions"><button id="m-cancel" class="btn btn-ghost">Close</button></div>
-    `);
-    $("m-cancel").onclick = closeModal;
-    $("sub-cyc-m").onclick = () => { cycle = "monthly"; renderPlans(); };
-    $("sub-cyc-y").onclick = () => { cycle = "yearly"; renderPlans(); };
-    document.querySelectorAll("[data-sub-tier]").forEach((btn) => {
-      btn.onclick = () => openUpiCheckoutModal(btn.dataset.subTier, cycle);
-    });
-  };
-  renderPlans();
-}
-
-async function openUpiCheckoutModal(tier, cycle) {
-  const spec = PLAN_SPECS[tier];
-  const amount = cycle === "yearly" ? spec.yearly : spec.monthly;
-  const upiUri = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI_ID)}&pn=${encodeURIComponent(MERCHANT_BENEFICIARY_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Book ${spec.name}`)}`;
-
-  openModal(`
-    <h3>Secure UPI Checkout • ${spec.name} (${cycle.toUpperCase()})</h3>
-    <div class="qr-checkout-box">
-      <canvas id="desktop-upi-qr" width="180" height="180"></canvas>
-      <div class="bold">Scan &amp; Pay ${inr(amount)} (Incl. 18% GST)</div>
-      <div class="muted">Merchant: ${escapeHtml(MERCHANT_BENEFICIARY_NAME)} • Verified UPI: <span class="mono">${escapeHtml(MERCHANT_UPI_ID)}</span></div>
-    </div>
-    <div class="form-field" style="margin-top:12px;">
-      <label>12-Digit UPI UTR / Transaction Reference *</label>
-      <input id="m-utr-input" class="input-text mono" maxlength="12" placeholder="e.g. 432198765432" />
-    </div>
-    <p id="m-err" class="error-box hidden"></p>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-confirm-pay" class="btn btn-primary">Verify &amp; Activate Plan</button>
-    </div>
-  `);
-
-  QRCode.toCanvas($("desktop-upi-qr"), upiUri, { width: 180, margin: 1 });
-  $("m-cancel").onclick = closeModal;
-  $("m-confirm-pay").onclick = async () => {
-    const utr = ($("m-utr-input").value || "").trim();
-    if (!/^[0-9]{12}$/.test(utr)) {
-      $("m-err").textContent = "Enter the exact 12-digit numeric UPI UTR reference.";
-      $("m-err").classList.remove("hidden");
-      return;
-    }
-    const days = cycle === "yearly" ? 365 : 30;
-    const expiresMs = Date.now() + days * 86400000;
-    await updateDoc(doc(db, "users", state.user.uid), {
-      planTier: tier,
-      billingCycle: cycle,
-      planExpiresAtMs: expiresMs,
-      planAmountPaid: amount,
-      updatedAt: serverTimestamp()
-    });
-    const toEmail = state.user.email || ADMIN_RECEIPT_EMAIL;
-    const subject = encodeURIComponent(`Congratulations! Your Book ${spec.name} Plan is Now Active`);
-    const body = encodeURIComponent(
-      `Congratulations! Your Book ${spec.name} (${cycle}) plan is now ACTIVE.\nAmount Paid: ₹${amount}\nUPI UTR: ${utr}\nMerchant: ${MERCHANT_BENEFICIARY_NAME} (${MERCHANT_UPI_ID})\nValid until: ${new Date(expiresMs).toDateString()}`
-    );
-    window.open(`mailto:${encodeURIComponent(toEmail)}?cc=${encodeURIComponent(ADMIN_RECEIPT_EMAIL)}&subject=${subject}&body=${body}`, "_blank");
-    closeModal();
-    showToast(`Congratulations! ${spec.name} Plan activated! Receipt emailed to ${toEmail}.`);
-  };
-}
-
-function openEWayModal(invoice) {
-  if (effectivePlanTier() !== "trial" && effectivePlanTier() !== "diamond") {
-    showToast("E-Invoice & E-Way Bill require Diamond or active 30-Day Trial.");
-    openSubscriptionModal();
-    return;
-  }
-  openModal(`
-    <h3>Generate E-Way Bill • ${escapeHtml(invoice.invoiceNumber)}</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>From City</label><input id="ew-from" class="input-text" value="${escapeHtml(activeProfile().state || "Mumbai")}" /></div>
-      <div class="form-field"><label>To City</label><input id="ew-to" class="input-text" value="${escapeHtml(invoice.partyState || "Pune")}" /></div>
-      <div class="form-field"><label>Distance (KM)</label><input id="ew-km" type="number" class="input-text" value="150" min="1" max="4000" /></div>
-      <div class="form-field"><label>Vehicle No.</label><input id="ew-veh" class="input-text mono" value="MH-12-AB-1234" /></div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Generate EWB</button>
-    </div>
-  `);
-  $("m-cancel").onclick = closeModal;
-  $("m-save").onclick = async () => {
-    const ewb = `EWB${String(Date.now()).slice(-9)}`;
-    await updateDoc(doc(db, "users", state.user.uid, "invoices", invoice.id), {
-      ewbNumber: ewb,
-      ewbDate: new Date().toISOString().slice(0, 10),
-      ewbValidUntil: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-      transportMode: "road",
-      distanceKm: Math.min(4000, Math.max(1, Number($("ew-km").value || 100))),
-      fromPlace: $("ew-from").value.trim().slice(0, 60),
-      toPlace: $("ew-to").value.trim().slice(0, 60),
-      vehicleNumber: $("ew-veh").value.trim().toUpperCase(),
-      vehicleType: "regular",
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast(`E-Way Bill ${ewb} saved!`);
-  };
-}
-
-function printInvoice(invoice) {
-  const prof = activeProfile();
-  const rows = (invoice.lineItems || [])
-    .map(
-      (l) => `<tr>
-      <td>${escapeHtml(l.name)}</td>
-      <td class="mono">${escapeHtml(l.hsnCode || "—")}</td>
-      <td class="right mono">${l.qty}</td>
-      <td class="right mono">${inr(l.unitPrice)}</td>
-      <td class="right mono">${l.gstRatePercent || 0}%</td>
-      <td class="right mono bold">${inr(l.lineTotal)}</td>
-    </tr>`
-    )
-    .join("");
-
-  $("print-sheet").innerHTML = `
-    <div style="border:1px solid #334155;padding:20px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0B253C;padding-bottom:12px;">
-        <div>
-          <h2 style="margin:0;">${escapeHtml(prof.businessName || "Book Enterprise")}</h2>
-          <div>GSTIN: ${escapeHtml(prof.gstin || "Plain Non-GST")}</div>
-          <div>${escapeHtml(prof.state || "")}</div>
-        </div>
-        <div style="text-align:right;">
-          <h3 style="margin:0;">${isPlainNonGst() ? "CASH MEMO / BILL" : "TAX INVOICE"}</h3>
-          <div class="mono bold">${escapeHtml(invoice.invoiceNumber)}</div>
-          ${invoice.irn ? `<div class="mono" style="font-size:10px;">IRN: ${escapeHtml(invoice.irn)}</div>` : ""}
-          ${invoice.ewbNumber ? `<div class="mono">EWB No: ${escapeHtml(invoice.ewbNumber)}</div>` : ""}
-        </div>
-      </div>
-      <div style="margin:14px 0;"><strong>Billed To:</strong> ${escapeHtml(invoice.partyName)} ${invoice.partyGstin ? `(${escapeHtml(invoice.partyGstin)})` : ""}</div>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th>Item</th><th>HSN</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">GST</th><th class="right">Total</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div style="text-align:right;margin-top:16px;font-size:16px;" class="mono bold">Grand Total: ${inr(invoice.grandTotal)}</div>
-    </div>
-  `;
-  window.print();
-}
-
-// Event bindings
-$("google-signin-btn").onclick = async () => {
-  try {
-    $("auth-error").classList.add("hidden");
-    await signInWithPopup(auth, googleProvider);
-  } catch (err) {
-    $("auth-error").textContent = err?.message || "Google Sign-In failed.";
-    $("auth-error").classList.remove("hidden");
-  }
+const TAB_TITLES = {
+  overview: ["Executive Overview", "Real-time business performance across synced mobile & desktop devices"],
+  billing: ["Billing & GST Invoices", "Create, edit, print A4/Thermal PDFs, IRN E-Invoices & E-Way Bills"],
+  stock: ["Inventory & Stock", "Manage SKUs, Purchase Stock-In (+GST ITC), and low-stock alerts"],
+  parties: ["Parties & Ledger", "Customer/Supplier Party Ledger, Item / Stock Ledger & Period P&L % analytics"],
+  expenses: ["Expenses & Cashbook", "Track operating bills, pending payables, GST ITC & Cashbook flow"],
+  reports: ["Reports & Analytics", "Profit & Loss, GSTR-1 / 2B / 3B, Sales & Expense and Stock Valuation"],
+  gst_filing: ["GST Filing Portal", "Generate GSTR-1 / GSTR-3B returns, download JSON & file via GST Portal API"],
+  ai: ["Finboss AI Copilot", "Ask AI Business Analyst, Voice-to-Invoice/Expense & Bill Photo OCR"],
+  workspace: ["Workspace & Settings", "Switch GST/Plain Profiles, Salesman OTP Seats, App Settings & Backups"]
 };
 
-$("signout-btn").onclick = () => signOut(auth);
-$("profile-select").onchange = (e) => {
-  state.activeProfileId = e.target.value;
-  renderAll();
-};
+function closeMobileSidebar() {
+  $("app-sidebar")?.classList.remove("mobile-open");
+  $("sidebar-backdrop")?.classList.add("hidden");
+}
 
-document.querySelectorAll("[data-tab]").forEach((btn) => {
-  btn.onclick = () => {
-    document.querySelectorAll("[data-tab]").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    $(`tab-${btn.dataset.tab}`).classList.add("active");
-    $("page-title").textContent = btn.textContent.trim();
+function updateSidebarActiveState(tabKey) {
+  document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.tab === tabKey));
+  document.querySelectorAll(".nav-subitem").forEach((sub) => {
+    let isMatch = sub.dataset.tab === tabKey;
+    if (isMatch && sub.dataset.subLedger) isMatch = sub.dataset.subLedger === state.ledgerView;
+    if (isMatch && sub.dataset.subReport) isMatch = sub.dataset.subReport === state.reportFocus;
+    if (isMatch && sub.dataset.subAi) isMatch = sub.dataset.subAi === state.aiMode;
+    sub.classList.toggle("active", isMatch);
+  });
+  document.querySelectorAll(".nav-group").forEach((grp) => {
+    const hasActive = Boolean(grp.querySelector(".nav-subitem.active"));
+    grp.classList.toggle("has-active", hasActive);
+    if (hasActive) {
+      grp.classList.add("open");
+      const toggle = grp.querySelector(".nav-group-toggle");
+      if (toggle) toggle.setAttribute("aria-expanded", "true");
+    }
+  });
+}
+
+function switchTab(tabKey) {
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${tabKey}`));
+  const [title, sub] = TAB_TITLES[tabKey] || TAB_TITLES.overview;
+  $("page-title").textContent = title;
+  $("page-subtitle").textContent = sub;
+  updateSidebarActiveState(tabKey);
+  closeMobileSidebar();
+}
+
+// --- Static UI Event Bindings ---
+document.querySelectorAll(".nav-group-toggle").forEach((toggle) => {
+  toggle.onclick = () => {
+    const grp = toggle.closest(".nav-group");
+    if (!grp) return;
+    const isOpen = grp.classList.toggle("open");
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   };
 });
+
+document.querySelectorAll(".nav-item").forEach((btn) => {
+  btn.onclick = () => switchTab(btn.dataset.tab);
+});
+
+document.querySelectorAll(".nav-subitem").forEach((btn) => {
+  btn.onclick = () => {
+    const tab = btn.dataset.tab;
+    if (btn.dataset.subLedger) {
+      state.ledgerView = btn.dataset.subLedger;
+      document.querySelectorAll("[data-ledger-view]").forEach((b) => b.classList.toggle("active", b.dataset.ledgerView === state.ledgerView));
+      renderParties();
+    }
+    if (btn.dataset.subReport) {
+      state.reportFocus = btn.dataset.subReport;
+      renderReports();
+    }
+    if (btn.dataset.subAi) {
+      state.aiMode = btn.dataset.subAi;
+      renderAiCopilot();
+    }
+    switchTab(tab);
+  };
+});
+
+if ($("mobile-menu-btn")) {
+  $("mobile-menu-btn").onclick = () => {
+    $("app-sidebar")?.classList.add("mobile-open");
+    $("sidebar-backdrop")?.classList.remove("hidden");
+  };
+}
+if ($("sidebar-backdrop")) {
+  $("sidebar-backdrop").onclick = closeMobileSidebar;
+}
 
 document.querySelectorAll("[data-jump-tab]").forEach((btn) => {
-  btn.onclick = () => {
-    document.querySelector(`[data-tab="${btn.dataset.jumpTab}"]`)?.click();
-  };
+  btn.onclick = () => switchTab(btn.dataset.jumpTab);
 });
 
-$("topbar-receive-payment-btn").onclick = openReceivePaymentModal;
-$("topbar-new-invoice-btn").onclick = openCreateInvoiceModal;
-$("topbar-whatsapp-btn").onclick = () => {
-  const biz = activeProfile().businessName || "Book";
-  const invoices = profileScoped(state.invoices);
-  const expenses = profileScoped(state.expenses);
-  const billed = invoices.reduce((s, i) => s + Number(i.grandTotal || 0), 0);
-  const collected = invoices.reduce((s, i) => s + Number(i.paidAmount || 0), 0);
-  const pending = Math.max(0, billed - collected);
-  const expTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const text = [
-    `*${biz} — Business Summary*`,
-    `Total Billed: ${inr(billed)} (${invoices.length} invoices)`,
-    `Collected Revenue: *${inr(collected)}*`,
-    `Pending Receivables: ${inr(pending)}`,
-    `Operating Expenses: ${inr(expTotal)}`,
-    `_Shared via Book_`
-  ].join("\n");
-  shareToWhatsApp(text);
+$("profile-select").onchange = (e) => {
+  state.activeProfileId = e.target.value;
+  localStorage.setItem("book_web_active_profile", state.activeProfileId);
+  renderAll();
+  showToast(`Switched to ${activeProfile().businessName}`);
 };
-$("billing-new-invoice-btn").onclick = openCreateInvoiceModal;
-$("stock-add-item-btn").onclick = openAddItemModal;
-$("parties-add-btn").onclick = openAddPartyModal;
-$("expenses-add-btn").onclick = openAddExpenseModal;
-$("topbar-plan-btn").onclick = openSubscriptionModal;
-$("open-subscription-btn").onclick = openSubscriptionModal;
-$("reports-print-btn").onclick = printLedgerStatement;
-$("ledger-print-btn").onclick = printLedgerStatement;
-$("ledger-wa-btn").onclick = () => {
-  const biz = activeProfile().businessName || "Book";
-  const a = computeLedgerAnalytics(state.ledgerPeriod);
-  const text = [
-    `*${biz} — Ledger & P&L (${a.rangeLabel})*`,
-    `Sales: ${inr(a.totalSales)} • Net P&L: *${inr(a.netProfit)}* (${fmtPct(a.netPct)})`,
-    `Stock Value: ${inr(a.stockValue)}`,
-    `_Shared via Book_`
-  ].join("\n");
-  shareToWhatsApp(text);
-};
+
+$("invoice-search").oninput = renderBilling;
+$("stock-search").oninput = renderStock;
+$("party-search").oninput = renderParties;
+$("expense-search").oninput = renderExpenses;
 
 document.querySelectorAll("[data-ledger-period]").forEach((btn) => {
   btn.onclick = () => {
     state.ledgerPeriod = btn.dataset.ledgerPeriod;
-    document.querySelectorAll("[data-ledger-period], [data-report-period]").forEach((b) => {
-      const p = b.dataset.ledgerPeriod || b.dataset.reportPeriod;
-      b.classList.toggle("active", p === state.ledgerPeriod);
-    });
+    document.querySelectorAll("[data-ledger-period]").forEach((b) => b.classList.toggle("active", b.dataset.ledgerPeriod === state.ledgerPeriod));
+    document.querySelectorAll("[data-report-period]").forEach((b) => b.classList.toggle("active", b.dataset.reportPeriod === state.ledgerPeriod));
     renderParties();
     renderReports();
   };
@@ -1339,12 +396,19 @@ document.querySelectorAll("[data-ledger-period]").forEach((btn) => {
 document.querySelectorAll("[data-report-period]").forEach((btn) => {
   btn.onclick = () => {
     state.ledgerPeriod = btn.dataset.reportPeriod;
-    document.querySelectorAll("[data-ledger-period], [data-report-period]").forEach((b) => {
-      const p = b.dataset.ledgerPeriod || b.dataset.reportPeriod;
-      b.classList.toggle("active", p === state.ledgerPeriod);
-    });
+    document.querySelectorAll("[data-report-period]").forEach((b) => b.classList.toggle("active", b.dataset.reportPeriod === state.ledgerPeriod));
+    document.querySelectorAll("[data-ledger-period]").forEach((b) => b.classList.toggle("active", b.dataset.ledgerPeriod === state.ledgerPeriod));
     renderParties();
     renderReports();
+  };
+});
+
+document.querySelectorAll("[data-report-focus]").forEach((btn) => {
+  btn.onclick = () => {
+    state.reportFocus = btn.dataset.reportFocus;
+    renderReports();
+    const activePanel = document.querySelector(".tab-panel.active")?.id?.replace("tab-", "") || "reports";
+    updateSidebarActiveState(activePanel);
   };
 });
 
@@ -1353,190 +417,114 @@ document.querySelectorAll("[data-ledger-view]").forEach((btn) => {
     state.ledgerView = btn.dataset.ledgerView;
     document.querySelectorAll("[data-ledger-view]").forEach((b) => b.classList.toggle("active", b.dataset.ledgerView === state.ledgerView));
     renderParties();
+    const activePanel = document.querySelector(".tab-panel.active")?.id?.replace("tab-", "") || "parties";
+    updateSidebarActiveState(activePanel);
   };
 });
 
-$("reports-whatsapp-btn").onclick = () => {
-  const biz = activeProfile().businessName || "Book";
+$("ledger-print-btn").onclick = printLedgerStatement;
+$("ledger-wa-btn").onclick = () => {
+  const prof = activeProfile();
+  const a = computeLedgerAnalytics(state.ledgerPeriod);
+  const topParties = a.parties
+    .filter((p) => p.hasSales)
+    .slice(0, 5)
+    .map((p) => `• ${p.name}: ${inr(p.profit)} (${fmtPct(p.pct)})`)
+    .join("\n");
+  const topItems = a.items
+    .filter((it) => it.hasSold)
+    .slice(0, 5)
+    .map((it) => `• ${it.name}: ${inr(it.profit)} (${fmtPct(it.pct)})`)
+    .join("\n");
+  const text = [
+    `*${prof.businessName || "Finboss Billing No.1 ERP"} — Ledger & P&L*`,
+    `Period: ${a.rangeLabel}`,
+    `Sales: *${inr(a.totalSales)}* | Stock Value: ${inr(a.stockValue)}`,
+    `Net P&L: *${inr(a.netProfit)} (${fmtPct(a.netPct)})*`,
+    topParties ? `\n*Top Parties:*\n${topParties}` : "",
+    topItems ? `\n*Top Items:*\n${topItems}` : "",
+    `\n_Shared via Finboss Billing No.1 ERP_`
+  ]
+    .filter(Boolean)
+    .join("\n");
+  shareToWhatsApp(text);
+};
+
+$("topbar-quick-entry-btn").onclick = openQuickEntryModal;
+$("parties-quick-entry-btn").onclick = openQuickEntryModal;
+$("topbar-receive-payment-btn").onclick = () => openReceivePaymentModal();
+$("topbar-new-invoice-btn").onclick = () => openInvoiceModal(null);
+$("billing-new-invoice-btn").onclick = () => openInvoiceModal(null);
+$("stock-add-item-btn").onclick = () => openItemModal(null);
+$("stock-purchase-btn").onclick = () => openPurchaseModal(null);
+$("parties-add-btn").onclick = () => openPartyModal(null);
+$("expenses-add-btn").onclick = () => openExpenseModal(null);
+$("open-subscription-btn").onclick = openSubscriptionModal;
+$("topbar-plan-btn").onclick = openSubscriptionModal;
+$("open-business-settings-btn").onclick = () => openBusinessProfileModal(state.activeProfileId, false);
+
+$("topbar-whatsapp-btn").onclick = () => {
   const invoices = profileScoped(state.invoices);
   const expenses = profileScoped(state.expenses);
-  const taxable = invoices.reduce((s, i) => s + Number(i.subtotal || 0), 0);
+  const billed = invoices.reduce((s, i) => s + Number(i.grandTotal || 0), 0);
+  const collected = invoices.reduce((s, i) => s + Number(i.paidAmount || 0), 0);
+  const pending = Math.max(0, billed - collected);
+  const exp = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const msg = `*${activeProfile().businessName || "Finboss Billing No.1 ERP"} — Business Summary*\nTotal Sales: *${inr(billed)}* (${invoices.length} bills)\nCollected: ${inr(collected)}\nPending Receivables: ${inr(pending)}\nExpenses: ${inr(exp)}\n_Shared via Finboss Billing No.1 ERP Desktop Web_`;
+  shareToWhatsApp(msg);
+};
+
+$("reports-print-btn").onclick = printLedgerStatement;
+$("reports-whatsapp-btn").onclick = () => {
+  const analytics = computeLedgerAnalytics(state.ledgerPeriod);
+  const invoices = analytics.invoices;
+  const expenses = analytics.expenses;
   const outGst = invoices.reduce((s, i) => s + Number(i.gstTotal || 0), 0);
   const inGst = expenses.reduce((s, e) => s + Number(e.gstInputAmount || 0), 0);
-  const netGst = Math.max(0, outGst - inGst);
-  const totalExp = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const profit = taxable - (totalExp - inGst);
-  const text = [
-    `*${biz} — GST & P&L Report*`,
-    `Taxable Sales (GSTR-1): ${inr(taxable)}`,
-    `Output GST: ${inr(outGst)}`,
-    `Purchase GST ITC: ${inr(inGst)}`,
-    `Net GST Liability: *${inr(netGst)}*`,
-    `Estimated Net Profit: *${inr(profit)}*`,
-    `_Shared via Book_`
-  ].join("\n");
+  const text = `*${activeProfile().businessName || "Finboss Billing No.1 ERP"} (${analytics.rangeLabel})*\nTaxable Sales: ${inr(invoices.reduce((s, i) => s + Number(i.subtotal || 0), 0))}\nOutput GST: ${inr(outGst)}\nInput ITC: ${inr(inGst)}\nNet GST Payable: ${inr(Math.max(0, outGst - inGst))}\nNet Profit/Loss: *${inr(analytics.netProfit)} (${fmtPct(analytics.netPct)})*\n_Shared via Finboss Billing No.1 ERP_`;
   shareToWhatsApp(text);
 };
-$("open-business-settings-btn").onclick = () => {
-  const prof = activeProfile();
-  openModal(`
-    <h3>Business Settings (${escapeHtml(prof.id)})</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>Business Name</label><input id="set-biz" class="input-text" value="${escapeHtml(prof.businessName || "")}" /></div>
-      <div class="form-field"><label>GSTIN</label><input id="set-gstin" class="input-text" ${isPlainNonGst() ? "disabled" : ""} value="${escapeHtml(prof.gstin || "")}" /></div>
-      <div class="form-field"><label>State</label><input id="set-state" class="input-text" value="${escapeHtml(prof.state || "")}" /></div>
-      <div class="form-field"><label>Monthly Target (₹)</label><input id="set-target" type="number" class="input-text" value="${Number(prof.monthlySalesTarget || 250000)}" /></div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Save Settings</button>
-    </div>
-  `);
-  $("m-cancel").onclick = closeModal;
-  $("m-save").onclick = async () => {
-    const biz = $("set-biz").value.trim().slice(0, 100);
-    if (!biz) return;
-    await updateDoc(doc(db, "users", state.user.uid, "business_profiles", prof.id), {
-      businessName: biz,
-      gstin: isPlainNonGst() ? "" : $("set-gstin").value.trim().toUpperCase().slice(0, 30),
-      state: $("set-state").value.trim().slice(0, 60),
-      monthlySalesTarget: Number($("set-target").value || 250000),
-      updatedAt: serverTimestamp()
-    });
-    closeModal();
-    showToast("Business settings synced!");
-  };
+
+$("modal-backdrop").onclick = (e) => {
+  if (e.target === $("modal-backdrop")) closeModal();
 };
 
-$("invoice-search").oninput = renderBilling;
-$("stock-search").oninput = renderStock;
-$("party-search").oninput = renderParties;
+// Wire modular table/feature event handlers
+setBillingSubscriptionOpener(openSubscriptionModal);
+bindBillingTableEvents();
+bindStockTableEvents();
+bindPartyTableEvents(openReceivePaymentModal);
+bindExpenseEvents();
+bindWorkspaceEvents();
+bindAiCopilotEvents();
+bindGstFilingEvents();
 
-$("billing-invoices-table").onclick = async (e) => {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
-  const inv = state.invoices.find((i) => i.id === btn.dataset.id);
-  if (!inv) return;
-  if (btn.dataset.action === "print-inv") printInvoice(inv);
-  if (btn.dataset.action === "wa-inv") {
-    const biz = activeProfile().businessName || "Book";
-    const due = Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0));
-    const lines = (inv.lineItems || []).map((l, idx) => `${idx + 1}. ${l.name} (${l.qty} ${l.unit}) = ${inr(l.lineTotal)}`).join("\n");
-    const text = [
-      `*${biz}*`,
-      `${isPlainNonGst() ? "Bill" : "Tax Invoice"}: *${inv.invoiceNumber}*`,
-      `Customer: ${inv.partyName}`,
-      inv.partyGstin ? `GSTIN: ${inv.partyGstin}` : "",
-      lines,
-      `Grand Total: *${inr(inv.grandTotal)}*`,
-      `Paid: ${inr(inv.paidAmount)} • Due: ${inr(due)}`,
-      inv.irn ? `IRN: ${inv.irn}` : "",
-      inv.ewbNumber ? `E-Way Bill: #${inv.ewbNumber}` : "",
-      `_Shared via Book_`
-    ].filter(Boolean).join("\n");
-    shareToWhatsApp(text, findPartyPhone(inv.partyId, inv.partyName));
-  }
-  if (btn.dataset.action === "eway") openEWayModal(inv);
-  if (btn.dataset.action === "mark-paid") {
-    await updateDoc(doc(db, "users", state.user.uid, "invoices", inv.id), {
-      paidAmount: Number(inv.grandTotal || 0),
-      status: "paid",
-      paymentMethod: "upi",
-      updatedAt: serverTimestamp()
-    });
-    showToast(`Marked ${inv.invoiceNumber} as PAID!`);
-  }
-  if (btn.dataset.action === "einvoice") {
-    if (effectivePlanTier() !== "trial" && effectivePlanTier() !== "diamond") {
-      showToast("E-Invoice requires Diamond or active 30-Day Trial.");
-      openSubscriptionModal();
-      return;
-    }
-    const fakeHex = Array.from({ length: 64 }, (_, i) => ((Date.now() + i * 7) % 16).toString(16)).join("");
-    await updateDoc(doc(db, "users", state.user.uid, "invoices", inv.id), {
-      irn: fakeHex,
-      ackNo: `1126${String(Date.now()).slice(-10)}`,
-      ackDate: new Date().toISOString().slice(0, 19).replace("T", " "),
-      signedQrData: `BOOK-IRP|${inv.invoiceNumber}|${fakeHex.slice(0, 16)}`,
-      einvoiceStatus: "generated",
-      updatedAt: serverTimestamp()
-    });
-    showToast(`E-Invoice IRN generated for ${inv.invoiceNumber}!`);
+// Google Auth Controls
+$("google-signin-btn").onclick = async () => {
+  $("auth-error").classList.add("hidden");
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (err) {
+    $("auth-error").textContent = err?.message || "Google Sign-In failed. Add your localhost/domain to Firebase Authorized Domains.";
+    $("auth-error").classList.remove("hidden");
   }
 };
 
-$("stock-items-table").onclick = async (e) => {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
-  const item = state.inventory.find((i) => i.id === btn.dataset.id);
-  if (!item) return;
-  if (btn.dataset.action === "restock") {
-    await updateDoc(doc(db, "users", state.user.uid, "inventory_items", item.id), {
-      stockQty: Number(item.stockQty || 0) + 10,
-      updatedAt: serverTimestamp()
-    });
-    showToast(`Added +10 ${item.unit} to ${item.name}`);
-  }
-  if (btn.dataset.action === "wa-stock") {
-    const biz = activeProfile().businessName || "Book";
-    const text = [
-      `*Product & Stock • ${biz}*`,
-      `Item: *${item.name}* (${item.sku})`,
-      item.hsnCode ? `HSN: ${item.hsnCode} • GST: ${Number(item.gstRatePercent || 0)}%` : "",
-      `Sale Rate: *${inr(item.salePrice)}* / ${item.unit}`,
-      `Available Stock: ${Number(item.stockQty || 0)} ${item.unit}`,
-      `_Shared via Book_`
-    ].filter(Boolean).join("\n");
-    shareToWhatsApp(text);
-  }
-};
-
-$("parties-table").onclick = (e) => {
-  const btn = e.target.closest("[data-action='wa-party']");
-  if (!btn) return;
-  const p = state.parties.find((x) => x.id === btn.dataset.id);
-  if (!p) return;
-  const biz = activeProfile().businessName || "Book";
-  const due = Math.max(0, Number(p.openingDue || 0) + Number(p.totalBilled || 0) - Number(p.totalPaid || 0));
-  const text = [
-    `*Khata Ledger • ${biz}*`,
-    `Party: *${p.name}*`,
-    p.gstin ? `GSTIN: ${p.gstin}` : "",
-    `Total Billed: ${inr(p.totalBilled || 0)}`,
-    `Total Paid: ${inr(p.totalPaid || 0)}`,
-    `Net Balance Due: *${inr(due)}*`,
-    `_Shared via Book_`
-  ].filter(Boolean).join("\n");
-  shareToWhatsApp(text, p.phone);
-};
-
-$("expenses-table").onclick = (e) => {
-  const btn = e.target.closest("[data-action='wa-exp']");
-  if (!btn) return;
-  const exp = state.expenses.find((x) => x.id === btn.dataset.id);
-  if (!exp) return;
-  const biz = activeProfile().businessName || "Book";
-  const text = [
-    `*Expense Voucher • ${biz}*`,
-    `Title: *${exp.title}*`,
-    `Category: ${(exp.category || "").toUpperCase()} • Mode: ${(exp.paymentMethod || "").toUpperCase()}`,
-    `Amount: *${inr(exp.amount)}* (${(exp.status || "").toUpperCase()})`,
-    exp.gstInputAmount > 0 ? `GST ITC: ${inr(exp.gstInputAmount)}` : "",
-    `_Shared via Book_`
-  ].filter(Boolean).join("\n");
-  shareToWhatsApp(text);
+$("signout-btn").onclick = async () => {
+  clearSubscriptions();
+  await signOut(auth);
 };
 
 onAuthStateChanged(auth, async (user) => {
   state.user = user;
-  clearSubscriptions();
-  if (user) {
-    $("auth-screen").classList.add("hidden");
-    $("app-shell").classList.remove("hidden");
-    await ensureBootstrapWorkspace(user);
-    startRealtimeSync(user.uid);
-  } else {
-    $("app-shell").classList.add("hidden");
+  if (!user) {
+    clearSubscriptions();
     $("auth-screen").classList.remove("hidden");
+    $("app-shell").classList.add("hidden");
+    return;
   }
+  $("auth-screen").classList.add("hidden");
+  $("app-shell").classList.remove("hidden");
+  await ensureBootstrapWorkspace(user);
+  startRealtimeSync(user.uid);
 });

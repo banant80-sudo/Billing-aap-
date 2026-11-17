@@ -127,7 +127,7 @@ fun AppSettingsSheet(
           Icon(Icons.Filled.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
           Column {
             Text(
-              text = "Book Settings & Logic",
+              text = "Finboss Settings & Logic",
               style = MaterialTheme.typography.headlineSmall,
               fontWeight = FontWeight.Bold,
             )
@@ -524,7 +524,7 @@ fun AppSettingsSheet(
         )
         SettingsSwitchRow(
           title = "Credit Limit Warning on Billing",
-          subtitle = "Highlights warning when customer Khata due exceeds credit limit",
+          subtitle = "Highlights warning when customer ledger due exceeds credit limit",
           checked = settings.warnOnCreditLimitExceeded,
           testTag = "settings_switch_warn_credit",
           onCheckedChange = { v -> onUpdateSettings { it.copy(warnOnCreditLimitExceeded = v) } },

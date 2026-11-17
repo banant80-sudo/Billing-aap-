@@ -43,8 +43,8 @@ object BookAiContextBuilder {
         isPlainNonGst = isPlainNonGst,
       )
 
-    appendLine("=== BOOK ERP LIVE BUSINESS SNAPSHOT ===")
-    appendLine("Business: ${profile?.businessName?.ifBlank { "Book Enterprise" } ?: "Book Enterprise"}")
+    appendLine("=== FINBOSS BILLING NO.1 ERP LIVE BUSINESS SNAPSHOT ===")
+    appendLine("Business: ${profile?.businessName?.ifBlank { "Finboss Enterprise" } ?: "Finboss Enterprise"}")
     appendLine("Mode: ${if (isPlainNonGst) "Plain Non-GST Counter" else "Main GST Business"}")
     if (!isPlainNonGst && !profile?.gstin.isNullOrBlank()) {
       appendLine("GSTIN: ${profile?.gstin}")

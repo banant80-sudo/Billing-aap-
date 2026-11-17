@@ -59,7 +59,7 @@ data class ErpModuleConfig(
           id = "parties",
           userId = userId,
           code = "parties",
-          title = "Parties & Khata Ledger",
+          title = "Parties & Ledger",
           subtitle = "Customers, suppliers, credit limits & payment reminders",
           status = STATUS_ACTIVE,
           isPinned = true,

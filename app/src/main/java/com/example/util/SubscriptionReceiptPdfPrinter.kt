@@ -65,7 +65,7 @@ object SubscriptionReceiptPdfPrinter {
   ): String {
     val pa = urlEncodeComponent(merchantUpiId.trim().ifBlank { DEFAULT_MERCHANT_UPI })
     val pn = urlEncodeComponent(beneficiaryName.trim().ifBlank { DEFAULT_MERCHANT_BENEFICIARY })
-    val tn = urlEncodeComponent(planNote.trim().ifBlank { "Book Subscription" })
+    val tn = urlEncodeComponent(planNote.trim().ifBlank { "Finboss Subscription" })
     val safeAmount = amountInr.coerceAtLeast(1)
     return "upi://pay?pa=$pa&pn=$pn&am=$safeAmount&cu=INR&tn=$tn"
   }
@@ -193,7 +193,7 @@ object SubscriptionReceiptPdfPrinter {
       transactionRef = transactionRef,
       merchantName = safeMerchantName,
       merchantUpiId = safeMerchantUpi,
-      subscriberBusinessName = subscriberBusinessName.trim().ifBlank { "Book Enterprise" },
+      subscriberBusinessName = subscriberBusinessName.trim().ifBlank { "Finboss Enterprise" },
       subscriberEmail = primaryEmail,
       ccEmail = ccEmail,
     )
@@ -250,7 +250,7 @@ object SubscriptionReceiptPdfPrinter {
         maximumFractionDigits = 2
       }
     val body = buildString {
-      appendLine("Congratulations! Your Book ${receipt.tier.displayName} ($cycleLabel) plan is now ACTIVE.")
+      appendLine("Congratulations! Your Finboss Billing No.1 ERP ${receipt.tier.displayName} ($cycleLabel) plan is now ACTIVE.")
       appendLine()
       appendLine("Receipt No.: ${receipt.receiptNumber}")
       appendLine("Subscriber: ${receipt.subscriberBusinessName}")
@@ -264,7 +264,7 @@ object SubscriptionReceiptPdfPrinter {
       appendLine("Valid Until: ${validFmt.format(Date(receipt.validUntilMs))}")
       appendLine()
       appendLine("Your GST Subscription Tax Receipt PDF is attached to this email.")
-      appendLine("Thank you for choosing Book!")
+      appendLine("Thank you for choosing Finboss Billing No.1 ERP!")
     }
 
     val sendIntent =
@@ -276,11 +276,11 @@ object SubscriptionReceiptPdfPrinter {
         }
         putExtra(
           Intent.EXTRA_SUBJECT,
-          "Congratulations! Your Book ${receipt.tier.displayName} Plan is Now Active (${receipt.receiptNumber})",
+          "Congratulations! Your Finboss ${receipt.tier.displayName} Plan is Now Active (${receipt.receiptNumber})",
         )
         putExtra(Intent.EXTRA_TEXT, body)
         putExtra(Intent.EXTRA_STREAM, pdfUri)
-        clipData = ClipData.newUri(context.contentResolver, "Book GST Subscription Receipt", pdfUri)
+        clipData = ClipData.newUri(context.contentResolver, "Finboss GST Subscription Receipt", pdfUri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
     return Intent.createChooser(sendIntent, "Send Congratulations & Receipt PDF")
@@ -329,7 +329,7 @@ object SubscriptionReceiptPdfPrinter {
 
     // 1. Navy Header Banner
     canvas.drawRect(0f, 0f, A4_WIDTH.toFloat(), 96f, navyPaint)
-    canvas.drawText("BOOK", MARGIN_X, 38f, whiteTitlePaint)
+    canvas.drawText("FINBOSS BILLING NO.1 ERP", MARGIN_X, 38f, whiteTitlePaint)
     canvas.drawText("GST SUBSCRIPTION TAX RECEIPT • CLOUD SAAS LICENSE", MARGIN_X, 58f, whiteSubPaint)
     canvas.drawText("SAC $SUBSCRIPTION_SAC_CODE • Verified Digital Tax Invoice", MARGIN_X, 74f, whiteSubPaint)
 
@@ -356,7 +356,7 @@ object SubscriptionReceiptPdfPrinter {
         textSize = 11.5f
       }
     canvas.drawText(
-      "Congratulations! Your Book ${receipt.tier.displayName} Plan is Now Active.",
+      "Congratulations! Your Finboss ${receipt.tier.displayName} Plan is Now Active.",
       MARGIN_X + 14f,
       y + 20f,
       congratsPaint,
@@ -422,7 +422,7 @@ object SubscriptionReceiptPdfPrinter {
 
     val inrFmt = NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply { maximumFractionDigits = 2 }
     canvas.drawText(
-      "Book ${receipt.tier.displayName} Subscription ($cycleLabel)",
+      "Finboss ${receipt.tier.displayName} Subscription ($cycleLabel)",
       MARGIN_X + 10f,
       rowTop + 21f,
       headingPaint,
@@ -466,7 +466,7 @@ object SubscriptionReceiptPdfPrinter {
     val footerY = A4_HEIGHT - 44f
     canvas.drawLine(MARGIN_X, footerY - 14f, CONTENT_RIGHT, footerY - 14f, borderPaint)
     canvas.drawText(
-      "This is a computer-generated GST Subscription Receipt from Book.",
+      "This is a computer-generated GST Subscription Receipt from Finboss Billing No.1 ERP.",
       MARGIN_X,
       footerY,
       mutedPaint,

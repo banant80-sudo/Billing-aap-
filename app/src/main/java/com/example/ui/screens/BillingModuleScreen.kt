@@ -356,9 +356,9 @@ fun BillingModuleContent(
               subtitle =
                 if (invoices.isEmpty()) {
                   if (isPlainNonGst)
-                    "Create clean plain non-GST bills with 0% tax, automatic stock deduction, and Khata sync."
+                    "Create clean plain non-GST bills with 0% tax, automatic stock deduction, and Party Ledger sync."
                   else
-                    "Create your first GST tax invoice or POS bill with automatic stock deduction and Khata sync."
+                    "Create your first GST tax invoice or POS bill with automatic stock deduction and Party Ledger sync."
                 } else "Try adjusting your search or payment status filter.",
               actionLabel =
                 if (canCreateInvoices) "Create Invoice" else null,
@@ -1818,7 +1818,7 @@ private fun DeleteInvoiceConfirmDialog(
     text = {
       Text(
         text =
-          "Deleting this ${formatErpMoney(currency, invoice.grandTotal)} invoice for ${invoice.partyName} will automatically restore linked stock quantities and reverse Party Khata balances.",
+          "Deleting this ${formatErpMoney(currency, invoice.grandTotal)} invoice for ${invoice.partyName} will automatically restore linked stock quantities and reverse Party Ledger balances.",
         style = MaterialTheme.typography.bodyMedium,
       )
     },
@@ -1850,7 +1850,7 @@ private fun buildShareableReceipt(
   currency: String,
   isPlainNonGst: Boolean = false,
 ): String = buildString {
-  appendLine(profile?.businessName ?: "Book")
+  appendLine(profile?.businessName ?: "Finboss Billing No.1 ERP")
   val sellerAddress =
     InvoicePdfPrinter.buildAddressLine(
       profile?.address.orEmpty(),

@@ -50,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,22 +110,28 @@ fun PartiesModuleContent(
   onDismissAddPartyDialog: () -> Unit,
   onOpenAddPartyDialog: () -> Unit,
   canManageParties: Boolean = true,
-  businessName: String = "Book",
+  businessName: String = "Finboss Billing No.1 ERP",
   invoices: List<GstInvoice> = emptyList(),
   inventory: List<InventoryItem> = emptyList(),
   expenses: List<ErpExpense> = emptyList(),
   entries: List<DashboardEntry> = emptyList(),
   profile: BusinessProfile? = null,
   isPlainNonGst: Boolean = false,
+  selectedLedgerMode: LedgerPageMode = LedgerPageMode.PARTY_LEDGER,
+  navigationNonce: Int = 0,
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
   var searchQuery by rememberSaveable { mutableStateOf("") }
   var typeFilter by rememberSaveable { mutableStateOf("all") }
   var selectedPeriod by rememberSaveable { mutableStateOf(LedgerPeriod.THIS_MONTH) }
-  var ledgerViewMode by rememberSaveable { mutableStateOf("parties") } // "parties", "items", "transactions"
+  var ledgerViewMode by rememberSaveable { mutableStateOf(selectedLedgerMode.key) } // "parties", "items", "transactions"
   var editingParty by remember { mutableStateOf<ErpParty?>(null) }
   var paymentParty by remember { mutableStateOf<ErpParty?>(null) }
+
+  LaunchedEffect(selectedLedgerMode, navigationNonce) {
+    ledgerViewMode = selectedLedgerMode.key
+  }
 
   val parties = (partiesState as? UiState.Success)?.data.orEmpty()
   val ledgerReport =
@@ -290,8 +297,8 @@ fun PartiesModuleContent(
       LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val viewTabs =
           listOf(
-            "parties" to "Party Profit (${parties.size})",
-            "items" to "Item & Stock (${ledgerReport.itemSummaries.size})",
+            "parties" to "Party Ledger (${parties.size})",
+            "items" to "Item / Stock Ledger (${ledgerReport.itemSummaries.size})",
             "transactions" to "Transactions (${ledgerReport.transactions.size})",
           )
         items(viewTabs) { (key, label) ->
@@ -474,7 +481,7 @@ fun PartiesModuleContent(
 
   val activePaymentParty = paymentParty
   if (activePaymentParty != null) {
-    KhataPaymentDialog(
+    PartyPaymentDialog(
       party = activePaymentParty,
       currency = currency,
       isBusy = isBusy,
@@ -624,7 +631,7 @@ private fun PartyLedgerCard(
           ) {
             Icon(
               imageVector = Icons.Filled.Share,
-              contentDescription = "Share Khata on WhatsApp",
+              contentDescription = "Share Party Statement on WhatsApp",
               tint = MaterialTheme.colorScheme.secondary,
               modifier = Modifier.size(18.dp),
             )
@@ -700,7 +707,7 @@ private fun PartyFormDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text(if (existing == null) "Add Party to Khata" else "Edit Party") },
+    title = { Text(if (existing == null) "Add Party to Ledger" else "Edit Party") },
     text = {
       Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -833,7 +840,7 @@ private fun PartyFormDialog(
 }
 
 @Composable
-private fun KhataPaymentDialog(
+private fun PartyPaymentDialog(
   party: ErpParty,
   currency: String,
   isBusy: Boolean,
@@ -846,7 +853,7 @@ private fun KhataPaymentDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Record Khata Payment") },
+    title = { Text("Record Party Payment") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(

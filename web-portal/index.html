@@ -3,24 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Book — Desktop Web Portal</title>
+  <title>Finboss Billing No.1 ERP — Desktop Web Portal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <!-- Auth Gate (Desktop Google Sign-In) -->
   <div id="auth-screen" class="auth-shell">
     <div class="auth-card">
       <div class="brand-badge">MODULAR CLOUD ERP • DESKTOP WEB</div>
-      <h1>Book</h1>
+      <h1>Finboss Billing No.1 ERP</h1>
       <p class="muted">
-        Full-screen Desktop Web Portal synced live with your Book Android Cloud Database (GST Billing, E-Invoice, E-Way Bill, Inventory, Ledger &amp; Reports).
+        Full-screen Desktop Web Portal synced live with your Finboss Billing No.1 ERP Cloud Database (GST Billing, E-Invoice, E-Way Bill, Inventory, Party Ledger, AI Copilot &amp; Team Seats).
       </p>
       <div class="auth-features">
         <div class="auth-feature-item">Real-Time Cloud Firestore Sync with Mobile App</div>
         <div class="auth-feature-item">Multi-Business Switcher (2 Main GST + 1 Plain Non-GST)</div>
-        <div class="auth-feature-item">One-Click A4 / Thermal Print, E-Invoice IRN &amp; E-Way Bill</div>
+        <div class="auth-feature-item">Multi-Line Billing, A4/Thermal Print, AI Copilot &amp; Backups</div>
       </div>
       <button id="google-signin-btn" class="btn btn-primary btn-lg full-width">
         <span>Sign in with Google (Owner Workspace)</span>
@@ -32,12 +33,15 @@
     </div>
   </div>
 
+  <div id="sidebar-backdrop" class="sidebar-backdrop hidden no-print"></div>
+
+  <!-- Main Desktop ERP Shell -->
   <div id="app-shell" class="app-shell hidden">
-    <aside class="sidebar no-print">
+    <aside id="app-sidebar" class="sidebar no-print">
       <div class="sidebar-brand">
-        <div class="brand-logo">B</div>
+        <div class="brand-logo">F</div>
         <div>
-          <div class="brand-title">Book</div>
+          <div class="brand-title">Finboss Billing No.1 ERP</div>
           <div class="brand-sub">Billing &amp; Ledger • Web</div>
         </div>
       </div>
@@ -48,14 +52,70 @@
         <div id="profile-mode-pill" class="mode-pill">Main GST</div>
       </div>
 
-      <nav class="nav-list">
-        <button class="nav-item active" data-tab="overview">Overview KPIs</button>
-        <button class="nav-item" data-tab="billing">Billing &amp; GST Invoices</button>
-        <button class="nav-item" data-tab="stock">Inventory &amp; Stock</button>
-        <button class="nav-item" data-tab="parties">Parties &amp; Ledger</button>
-        <button class="nav-item" data-tab="expenses">Expenses &amp; Cashbook</button>
-        <button class="nav-item" data-tab="reports">GST &amp; P&amp;L Reports</button>
-        <button class="nav-item" data-tab="gst">GST Filing</button>
+      <nav class="nav-list" aria-label="Main Navigation">
+        <button class="nav-item active" data-tab="overview">
+          <span class="nav-label-wrap"><span class="nav-dot"></span><span>Executive Overview</span></span>
+        </button>
+
+        <div class="nav-group" data-nav-group="billing">
+          <button type="button" class="nav-group-toggle" aria-expanded="false">
+            <span class="nav-label-wrap"><span class="nav-dot"></span><span>Billing &amp; Vouchers</span></span>
+            <span class="nav-chevron">▾</span>
+          </button>
+          <div class="nav-submenu">
+            <button type="button" class="nav-subitem" data-tab="billing">Sales &amp; GST Invoices</button>
+            <button type="button" class="nav-subitem" data-tab="stock">Inventory &amp; Stock</button>
+            <button type="button" class="nav-subitem" data-tab="expenses">Expenses &amp; Cashbook</button>
+          </div>
+        </div>
+
+        <div class="nav-group open" data-nav-group="ledger">
+          <button type="button" class="nav-group-toggle" aria-expanded="true">
+            <span class="nav-label-wrap"><span class="nav-dot"></span><span>Ledger</span></span>
+            <span class="nav-chevron">▾</span>
+          </button>
+          <div class="nav-submenu">
+            <button type="button" class="nav-subitem" data-tab="parties" data-sub-ledger="parties">Party Ledger</button>
+            <button type="button" class="nav-subitem" data-tab="parties" data-sub-ledger="items">Item / Stock Ledger</button>
+            <button type="button" class="nav-subitem" data-tab="parties" data-sub-ledger="transactions">Transactions</button>
+            <button type="button" class="nav-subitem" data-tab="parties" data-sub-ledger="quick">Quick Entries</button>
+          </div>
+        </div>
+
+        <div class="nav-group open" data-nav-group="reports">
+          <button type="button" class="nav-group-toggle" aria-expanded="true">
+            <span class="nav-label-wrap"><span class="nav-dot"></span><span>Reports</span></span>
+            <span class="nav-chevron">▾</span>
+          </button>
+          <div class="nav-submenu">
+            <button type="button" class="nav-subitem" data-tab="reports" data-sub-report="pl">Profit &amp; Loss (P&amp;L)</button>
+            <button type="button" class="nav-subitem" data-tab="reports" data-sub-report="gst">GST Report (GSTR-1/2B/3B)</button>
+            <button type="button" class="nav-subitem" data-tab="reports" data-sub-report="sales_exp">Sales &amp; Expense Report</button>
+            <button type="button" class="nav-subitem" data-tab="reports" data-sub-report="stock_val">Stock Valuation Report</button>
+          </div>
+        </div>
+
+        <button class="nav-item" data-tab="gst_filing">
+          <span class="nav-label-wrap"><span class="nav-dot"></span><span>GST Filing Portal</span></span>
+        </button>
+
+        <div class="nav-divider"></div>
+
+        <div class="nav-group" data-nav-group="ai">
+          <button type="button" class="nav-group-toggle" aria-expanded="false">
+            <span class="nav-label-wrap"><span class="nav-dot"></span><span>Finboss AI Copilot</span></span>
+            <span class="nav-chevron">▾</span>
+          </button>
+          <div class="nav-submenu">
+            <button type="button" class="nav-subitem" data-tab="ai" data-sub-ai="chat">AI Business Analyst</button>
+            <button type="button" class="nav-subitem" data-tab="ai" data-sub-ai="voice">Voice-to-Bill / Expense</button>
+            <button type="button" class="nav-subitem" data-tab="ai" data-sub-ai="ocr">Bill Photo OCR Scanner</button>
+          </div>
+        </div>
+
+        <button class="nav-item" data-tab="workspace">
+          <span class="nav-label-wrap"><span class="nav-dot"></span><span>Workspace &amp; Settings</span></span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -63,7 +123,7 @@
           <span class="plan-badge-title" id="sidebar-plan-badge">30-Day Free Trial</span>
           <span class="plan-badge-sub" id="sidebar-plan-sub">Manage Plan &amp; Upgrade →</span>
         </button>
-        <button id="open-business-settings-btn" class="btn btn-ghost full-width">Business Settings</button>
+        <button id="open-business-settings-btn" class="btn btn-ghost full-width">Business Profile Settings</button>
         <div class="user-row">
           <div class="user-meta">
             <div id="user-name-label" class="user-name">Owner</div>
@@ -76,12 +136,16 @@
 
     <main class="main-content">
       <header class="topbar no-print">
-        <div>
-          <h2 id="page-title">Executive Overview</h2>
-          <p id="page-subtitle" class="muted">Real-time business performance across synced mobile &amp; desktop devices</p>
+        <div class="topbar-title-row">
+          <button id="mobile-menu-btn" type="button" class="btn btn-ghost btn-sm mobile-menu-btn" aria-label="Open Navigation Menu">☰ Menu</button>
+          <div>
+            <h2 id="page-title">Executive Overview</h2>
+            <p id="page-subtitle" class="muted">Real-time business performance across synced mobile &amp; desktop devices</p>
+          </div>
         </div>
         <div class="topbar-actions">
           <span id="sync-pill" class="sync-pill">● Live Synced</span>
+          <button id="topbar-quick-entry-btn" class="btn btn-ghost">+ Quick Entry</button>
           <button id="topbar-receive-payment-btn" class="btn btn-secondary">Receive Payment</button>
           <button id="topbar-new-invoice-btn" class="btn btn-primary">+ Create Invoice</button>
           <button id="topbar-whatsapp-btn" class="btn btn-ghost">WhatsApp Summary</button>
@@ -91,6 +155,7 @@
 
       <div id="toast-banner" class="toast-banner hidden no-print"></div>
 
+      <!-- TAB: OVERVIEW -->
       <section id="tab-overview" class="tab-panel active">
         <div class="kpi-grid">
           <div class="kpi-card">
@@ -147,10 +212,19 @@
         </div>
       </section>
 
+      <!-- TAB: BILLING -->
       <section id="tab-billing" class="tab-panel">
-        <div class="toolbar">
-          <input id="invoice-search" class="input-text search-input" type="search" placeholder="Search invoice #, party, GSTIN, IRN, EWB..." />
-          <button id="billing-new-invoice-btn" class="btn btn-primary">+ Create Invoice</button>
+        <div class="toolbar toolbar-wrap">
+          <div class="period-bar">
+            <button class="chip-btn active" data-bill-status="all">All</button>
+            <button class="chip-btn" data-bill-status="paid">Paid</button>
+            <button class="chip-btn" data-bill-status="partial">Partial</button>
+            <button class="chip-btn" data-bill-status="unpaid">Unpaid</button>
+          </div>
+          <div class="toolbar-right">
+            <input id="invoice-search" class="input-text search-input" type="search" placeholder="Search invoice #, party, GSTIN, IRN, EWB..." />
+            <button id="billing-new-invoice-btn" class="btn btn-primary">+ Create Invoice</button>
+          </div>
         </div>
         <div class="card">
           <div class="table-wrap">
@@ -172,10 +246,20 @@
         </div>
       </section>
 
+      <!-- TAB: STOCK -->
       <section id="tab-stock" class="tab-panel">
-        <div class="toolbar">
-          <input id="stock-search" class="input-text search-input" type="search" placeholder="Search SKU, product name, HSN code..." />
-          <button id="stock-add-item-btn" class="btn btn-primary">+ Add Stock SKU</button>
+        <div id="stock-kpi-strip" class="report-summary-grid"></div>
+        <div class="toolbar toolbar-wrap">
+          <div class="period-bar">
+            <button class="chip-btn active" data-stock-filter="all">All SKUs</button>
+            <button class="chip-btn" data-stock-filter="low">Low Stock</button>
+            <button class="chip-btn" data-stock-filter="out">Out of Stock</button>
+          </div>
+          <div class="toolbar-right">
+            <input id="stock-search" class="input-text search-input" type="search" placeholder="Search SKU, product name, HSN code..." />
+            <button id="stock-purchase-btn" class="btn btn-secondary">+ Purchase Stock-In</button>
+            <button id="stock-add-item-btn" class="btn btn-primary">+ Add Stock SKU</button>
+          </div>
         </div>
         <div class="card">
           <div class="table-wrap">
@@ -185,7 +269,7 @@
                   <th>Product Name</th>
                   <th>SKU / HSN</th>
                   <th>GST %</th>
-                  <th class="right">Sale Rate</th>
+                  <th class="right">Sale / Cost</th>
                   <th class="right">Stock Qty</th>
                   <th class="right">Actions</th>
                 </tr>
@@ -196,6 +280,7 @@
         </div>
       </section>
 
+      <!-- TAB: PARTIES & LEDGER -->
       <section id="tab-parties" class="tab-panel">
         <div class="card">
           <div class="card-header">
@@ -219,19 +304,26 @@
           <div id="ledger-kpi-strip" class="report-summary-grid"></div>
         </div>
 
-        <div class="toolbar">
+        <div class="toolbar toolbar-wrap">
           <div class="period-bar" id="ledger-view-bar">
             <button class="chip-btn active" data-ledger-view="parties">Party Profit</button>
             <button class="chip-btn" data-ledger-view="items">Item &amp; Stock Profit</button>
             <button class="chip-btn" data-ledger-view="transactions">Transactions</button>
+            <button class="chip-btn" data-ledger-view="quick">Quick Entries</button>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;">
+          <div class="toolbar-right">
             <input id="party-search" class="input-text search-input" type="search" placeholder="Search party, item, SKU, ref #..." />
+            <button id="parties-quick-entry-btn" class="btn btn-ghost">+ Quick Entry</button>
             <button id="parties-add-btn" class="btn btn-primary">+ Add Customer / Supplier</button>
           </div>
         </div>
 
         <div id="ledger-parties-wrap" class="card">
+          <div class="period-bar" style="margin-bottom:12px;">
+            <button class="chip-btn active" data-party-type="all">All Parties</button>
+            <button class="chip-btn" data-party-type="customer">Customers</button>
+            <button class="chip-btn" data-party-type="supplier">Suppliers</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -249,14 +341,90 @@
             </table>
           </div>
         </div>
+
+        <div id="ledger-items-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item / SKU</th>
+                  <th class="right">Stock Qty</th>
+                  <th class="right">Stock Value</th>
+                  <th class="right">Sold Qty</th>
+                  <th class="right">Sales</th>
+                  <th class="right">Cost</th>
+                  <th class="right">Profit / Loss (%)</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-items-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="ledger-tx-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type / Ref #</th>
+                  <th>Party &amp; Items</th>
+                  <th class="right">Amount</th>
+                  <th class="right">Profit / Loss (%)</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tx-table"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="ledger-quick-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Category</th>
+                  <th>Party</th>
+                  <th>Ref Code</th>
+                  <th>Status</th>
+                  <th class="right">Amount</th>
+                  <th class="right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="quick-entries-table"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
+      <!-- TAB: EXPENSES & CASHBOOK -->
       <section id="tab-expenses" class="tab-panel">
-        <div class="toolbar">
-          <h3>Expenses, Purchases &amp; Cashbook</h3>
-          <button id="expenses-add-btn" class="btn btn-primary">+ Record Expense</button>
+        <div class="toolbar toolbar-wrap">
+          <div class="period-bar">
+            <button class="chip-btn active" data-exp-mode="expenses">Operating Expenses</button>
+            <button class="chip-btn" data-exp-mode="cashbook">Cashbook Ledger</button>
+          </div>
+          <div class="toolbar-right">
+            <input id="expense-search" class="input-text search-input" type="search" placeholder="Search expense title, party, ref..." />
+            <button id="expenses-add-btn" class="btn btn-primary">+ Record Expense</button>
+          </div>
         </div>
-        <div class="card">
+
+        <div id="expenses-kpi-strip" class="report-summary-grid"></div>
+
+        <div id="expenses-list-wrap" class="card">
+          <div class="period-bar" style="margin-bottom:12px;">
+            <button class="chip-btn active" data-exp-cat="all">All</button>
+            <button class="chip-btn" data-exp-cat="purchases">Purchases</button>
+            <button class="chip-btn" data-exp-cat="rent">Rent</button>
+            <button class="chip-btn" data-exp-cat="payroll">Payroll</button>
+            <button class="chip-btn" data-exp-cat="utilities">Utilities</button>
+            <button class="chip-btn" data-exp-cat="transport">Transport</button>
+            <button class="chip-btn" data-exp-cat="marketing">Marketing</button>
+            <button class="chip-btn" data-exp-cat="tax">Tax Fees</button>
+            <button class="chip-btn" data-exp-cat="other">Other</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -274,13 +442,31 @@
             </table>
           </div>
         </div>
+
+        <div id="cashbook-feed-wrap" class="card hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Voucher / Title</th>
+                  <th>Party / Details</th>
+                  <th>Mode</th>
+                  <th class="right">Inflow / Outflow</th>
+                </tr>
+              </thead>
+              <tbody id="cashbook-table"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
+      <!-- TAB: REPORTS -->
       <section id="tab-reports" class="tab-panel">
         <div class="card">
           <div class="card-header">
             <div>
-              <h3>Report Period Filter</h3>
+              <h3>GST (GSTR-1 / GSTR-3B) &amp; P&amp;L Period</h3>
               <div id="reports-range-label" class="muted"></div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -288,7 +474,7 @@
               <button id="reports-whatsapp-btn" class="btn btn-sm btn-primary">Share Report on WhatsApp</button>
             </div>
           </div>
-          <div class="period-bar" id="reports-period-bar">
+          <div class="period-bar" id="reports-period-bar" style="margin-bottom:10px;">
             <button class="chip-btn active" data-report-period="month">This Month</button>
             <button class="chip-btn" data-report-period="quarter">Quarter</button>
             <button class="chip-btn" data-report-period="half_year">Half Year</button>
@@ -296,8 +482,16 @@
             <button class="chip-btn" data-report-period="present_year">Present Year</button>
             <button class="chip-btn" data-report-period="all">All Time</button>
           </div>
+          <div class="period-bar" id="reports-focus-bar">
+            <button class="chip-btn active" data-report-focus="all">All Reports</button>
+            <button class="chip-btn" data-report-focus="pl">Profit &amp; Loss (P&amp;L)</button>
+            <button class="chip-btn" data-report-focus="gst">GST (GSTR-1 / 2B / 3B)</button>
+            <button class="chip-btn" data-report-focus="sales_exp">Sales &amp; Expense</button>
+            <button class="chip-btn" data-report-focus="stock_val">Stock Valuation</button>
+          </div>
         </div>
-        <div class="kpi-grid">
+
+        <div id="rep-gst-kpi-grid" class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-label">Taxable Sales (GSTR-1)</div>
             <div id="rep-taxable-sales" class="kpi-value mono">₹0</div>
@@ -315,71 +509,269 @@
             <div id="rep-net-gst" class="kpi-value mono text-amber">₹0</div>
           </div>
         </div>
-        <div class="card">
+
+        <div id="rep-pl-card" class="card">
           <div class="card-header">
-            <h3>Business Profit &amp; Loss Snapshot</h3>
+            <h3>Business Profit &amp; Loss &amp; Tax Breakdown</h3>
           </div>
           <div id="rep-pl-summary" class="report-summary-grid"></div>
         </div>
+
+        <div id="rep-sales-expense-card" class="card">
+          <div class="card-header">
+            <h3>Sales &amp; Operating Expense Report</h3>
+          </div>
+          <div id="rep-sales-expense-summary" class="report-summary-grid"></div>
+        </div>
+
+        <div id="rep-stock-val-card" class="card">
+          <div class="card-header">
+            <h3>Stock Valuation Report</h3>
+          </div>
+          <div id="rep-stock-val-summary" class="report-summary-grid"></div>
+        </div>
+
+        <div id="rep-slabs-card" class="card">
+          <div class="card-header">
+            <h3>Tax Slab Summary</h3>
+          </div>
+          <div id="rep-slabs-wrap" style="display:grid;gap:12px;"></div>
+        </div>
+
+        <div id="rep-hsn-card" class="card">
+          <div class="card-header">
+            <h3>HSN-Wise Sales Summary (GSTR-1 Table 12)</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>HSN Code</th>
+                  <th class="right">Total Qty</th>
+                  <th class="right">Taxable Value</th>
+                  <th class="right">Total GST</th>
+                  <th class="right">Invoice Total</th>
+                </tr>
+              </thead>
+              <tbody id="rep-hsn-table"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
-      <section id="tab-gst" class="tab-panel">
-        <div class="card gst-card">
+      <!-- TAB: GST FILING PORTAL -->
+      <section id="tab-gst_filing" class="tab-panel">
+        <div class="gst-card">
           <div class="card-header">
-            <h3>GST Filing / WhiteBooks Integration</h3>
-            <span class="pill pill-info">Secure backend mode</span>
+            <div>
+              <h3>GST Return Filing &amp; Portal Connection (GSTR-1 / GSTR-3B)</h3>
+              <div class="muted">Live return data computed from your Finboss Billing No.1 ERP invoices &amp; purchase ITC</div>
+            </div>
+            <span id="gst-filing-mode-badge" class="pill pill-info">GST Registered</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Return Period (MMYYYY)</label>
+              <input id="gst-return-period" class="input-text mono" maxlength="6" placeholder="112026" />
+            </div>
+            <div class="form-field">
+              <label>Active Business GSTIN</label>
+              <input id="gst-filing-gstin" class="input-text mono" placeholder="27ABCDE1234F1Z5" />
+            </div>
+            <div class="form-field">
+              <label>GST Portal Username</label>
+              <input id="gst-portal-username" class="input-text" placeholder="portal_username" />
+            </div>
+            <div class="form-field">
+              <label>Registered Email</label>
+              <input id="gst-portal-email" class="input-text" placeholder="owner@business.com" />
+            </div>
+            <div class="form-field span-2">
+              <label>GST API Server URL (Firebase Hosting / Cloud Function Origin)</label>
+              <input id="gst-api-base-url" class="input-text mono" placeholder="https://gen-lang-client-0249346990.web.app" />
+            </div>
+            <div class="form-field">
+              <label>Portal OTP (for GSP Session Verification)</label>
+              <input id="gst-portal-otp" class="input-text mono" maxlength="8" placeholder="Enter 6-digit OTP" />
+            </div>
+            <div class="form-field" style="align-content:end;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="gst-request-otp-btn" class="btn btn-secondary">Request OTP</button>
+                <button id="gst-verify-otp-btn" class="btn btn-primary">Verify OTP</button>
+              </div>
+            </div>
+          </div>
+          <div id="gst-portal-status" class="gst-status-banner hidden"></div>
+        </div>
+
+        <div class="gst-grid">
+          <div class="gst-card">
+            <div class="card-header">
+              <div>
+                <h3>GSTR-1 (Outward Supplies)</h3>
+                <div id="gst-gstr1-meta" class="muted">0 B2B • 0 B2C • 0 HSN rows</div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="gst-dl-gstr1-btn" class="btn btn-ghost btn-sm">Download JSON</button>
+                <button id="gst-upload-gstr1-btn" class="btn btn-primary btn-sm">Upload GSTR-1</button>
+              </div>
+            </div>
+            <div id="gst-gstr1-kpis" class="report-summary-grid"></div>
+            <pre id="gst-gstr1-preview" class="gst-json-preview"></pre>
           </div>
 
-          <div class="gst-form-grid">
-            <div class="form-field">
-              <label>GSTIN</label>
-              <input id="gstin-input" class="input-text" type="text" placeholder="27AABCF9012R1Z5" />
+          <div class="gst-card">
+            <div class="card-header">
+              <div>
+                <h3>GSTR-3B (Tax Liability &amp; ITC + EVC)</h3>
+                <div id="gst-gstr3b-meta" class="muted">Auto-reconciled Output GST vs Input ITC</div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="gst-dl-gstr3b-btn" class="btn btn-ghost btn-sm">Download JSON</button>
+                <button id="gst-save-gstr3b-btn" class="btn btn-secondary btn-sm">Save GSTR-3B</button>
+              </div>
             </div>
-            <div class="form-field">
-              <label>GST Username</label>
-              <input id="gst-username-input" class="input-text" type="text" placeholder="your_gst_username" />
+            <div id="gst-gstr3b-kpis" class="report-summary-grid"></div>
+            <div class="form-grid" style="margin-top:12px;">
+              <div class="form-field">
+                <label>Authorized Signatory PAN</label>
+                <input id="gst-evc-pan" class="input-text mono" maxlength="10" placeholder="ABCDE1234F" />
+              </div>
+              <div class="form-field">
+                <label>EVC OTP</label>
+                <input id="gst-evc-otp" class="input-text mono" maxlength="8" placeholder="EVC OTP" />
+              </div>
             </div>
-            <div class="form-field">
-              <label>Return Period</label>
-              <input id="gst-period-input" class="input-text" type="text" placeholder="MMYYYY" />
+            <div style="display:flex;justify-content:flex-end;">
+              <button id="gst-file-evc-btn" class="btn btn-primary btn-sm">File GSTR-3B with EVC</button>
             </div>
-            <div class="form-field">
-              <label>Mode</label>
-              <select id="gst-mode-select" class="input-select">
-                <option value="sandbox">Sandbox</option>
-                <option value="live">Live</option>
+            <pre id="gst-gstr3b-preview" class="gst-json-preview"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: FINBOSS AI COPILOT -->
+      <section id="tab-ai" class="tab-panel">
+        <div class="toolbar toolbar-wrap">
+          <div class="period-bar">
+            <button class="chip-btn active" data-ai-mode="chat">AI Business Analyst</button>
+            <button class="chip-btn" data-ai-mode="voice">Voice-to-Bill / Expense</button>
+            <button class="chip-btn" data-ai-mode="ocr">Bill Photo OCR Scanner</button>
+          </div>
+        </div>
+
+        <!-- AI Chat -->
+        <div id="ai-chat-wrap" class="card">
+          <div class="card-header">
+            <h3>Ask Finboss AI Analyst</h3>
+            <span class="pill pill-info">Live Cloud Data Grounded</span>
+          </div>
+          <div class="period-bar" style="margin-bottom:12px;">
+            <button class="chip-btn" data-ai-chip="Iss mahine ka profit, expenses aur pending receivables summarize karo">Monthly P&amp;L Summary</button>
+            <button class="chip-btn" data-ai-chip="Sabse zyada profit aur sabse zyada udhar wale top parties kaun hain?">Top Profit &amp; Due Parties</button>
+            <button class="chip-btn" data-ai-chip="Kaunse stock items low hain jo jaldi purchase karne chahiye?">Low Stock Alerts</button>
+            <button class="chip-btn" data-ai-chip="Mera Output GST aur Input ITC kitna ban raha hai?">GST Liability Check</button>
+          </div>
+          <div id="ai-chat-log" class="ai-chat-box"></div>
+          <div class="ai-input-row">
+            <input id="ai-chat-input" class="input-text" placeholder="Ask in Hindi, Hinglish, or English (e.g. Is week ka top selling item kya hai?)..." />
+            <button id="ai-chat-send" class="btn btn-primary">Send</button>
+          </div>
+        </div>
+
+        <!-- AI Voice -->
+        <div id="ai-voice-wrap" class="card hidden">
+          <div class="card-header">
+            <h3>Voice / Hinglish Command to Invoice or Expense</h3>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="ai-voice-lang" class="input-select" style="width:auto;">
+                <option value="en-IN">English / Hinglish (IN)</option>
+                <option value="hi-IN">Hindi (hi-IN)</option>
               </select>
+              <button id="ai-voice-mic-btn" class="btn btn-secondary btn-sm">Start Mic</button>
             </div>
           </div>
-
-          <div class="modal-actions">
-            <button id="gst-request-otp-btn" class="btn btn-primary">Request OTP</button>
-            <button id="gst-save-draft-btn" class="btn btn-secondary">Save GSTR-1 Draft</button>
-            <button id="gst-file-return-btn" class="btn btn-primary">File GSTR-1</button>
+          <div class="period-bar" style="margin-bottom:10px;">
+            <button class="chip-btn" data-voice-sample="Ramesh Traders ko 10 Cement Bag 400 rupaye credit par bill banao">Sample: Sale Bill</button>
+            <button class="chip-btn" data-voice-sample="Aaj petrol aur freight ka 850 cash kharch hua">Sample: Cash Expense</button>
           </div>
-
-          <div class="form-field">
-            <label>OTP</label>
-            <input id="gst-otp-input" class="input-text" type="text" placeholder="Enter OTP from GST portal" />
+          <textarea id="ai-voice-text" class="input-text" rows="3" placeholder="Speak with Mic or type a command here..."></textarea>
+          <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+            <button id="ai-voice-parse-btn" class="btn btn-primary">Parse Command with AI</button>
           </div>
+          <div id="ai-voice-result" style="margin-top:14px;"></div>
+        </div>
 
-          <div class="modal-actions">
-            <button id="gst-verify-otp-btn" class="btn btn-secondary">Verify OTP</button>
+        <!-- AI Bill Photo OCR -->
+        <div id="ai-ocr-wrap" class="card hidden">
+          <div class="card-header">
+            <h3>Bill Photo OCR Scanner (Gemini Vision)</h3>
           </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+            <input id="ai-ocr-file" type="file" accept="image/*" capture="environment" class="input-text" style="max-width:340px;" />
+            <button id="ai-ocr-scan-btn" class="btn btn-primary">Scan Bill Photo with AI</button>
+          </div>
+          <img id="ai-ocr-preview" class="ocr-preview-img hidden" alt="Bill Preview" />
+          <div id="ai-ocr-result" style="margin-top:14px;"></div>
+        </div>
+      </section>
 
-          <div id="gst-result-box" class="error-box hidden"></div>
+      <!-- TAB: WORKSPACE & SETTINGS -->
+      <section id="tab-workspace" class="tab-panel">
+        <div class="card">
+          <div class="card-header">
+            <h3>Multi-Business Profiles (2 Main GST + 1 Plain Non-GST)</h3>
+            <button id="ws-open-sub-btn" class="btn btn-sm btn-secondary">Manage Plan &amp; Tiers</button>
+          </div>
+          <div id="ws-profiles-grid" class="plans-grid"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Salesman OTP Team Seats (Up to 5 Staff)</h3>
+              <div id="ws-team-sub" class="muted">Loading seats...</div>
+            </div>
+            <button id="ws-add-seat-btn" class="btn btn-primary btn-sm">+ Add Salesman Seat</button>
+          </div>
+          <div id="ws-team-list" style="display:grid;gap:10px;"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>App Settings &amp; Print Configuration</h3>
+            <button id="ws-open-settings-btn" class="btn btn-secondary btn-sm">Configure Settings</button>
+          </div>
+          <div id="ws-settings-summary" style="display:grid;gap:6px;font-size:13px;"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Cloud Sync &amp; Portable JSON Backup</h3>
+              <div id="ws-backup-summary" class="muted"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <button id="ws-export-json-btn" class="btn btn-primary btn-sm">Export JSON Backup</button>
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                Restore JSON Backup
+                <input id="ws-import-json-input" type="file" accept="application/json" style="display:none;" />
+              </label>
+            </div>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
+  <!-- MODAL ROOT -->
   <div id="modal-backdrop" class="modal-backdrop hidden no-print">
     <div id="modal-container" class="modal-card"></div>
   </div>
 
+  <!-- PRINTABLE SHEET (Invoices, Ledger Statements & Subscription Receipts) -->
   <div id="print-sheet" class="print-only"></div>
 
   <script type="module" src="./js/app.js"></script>
-  <script type="module" src="./js/gst-portal.js"></script>
 </body>
 </html>

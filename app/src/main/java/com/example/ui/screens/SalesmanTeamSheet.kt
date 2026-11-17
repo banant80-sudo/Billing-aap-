@@ -359,7 +359,7 @@ private fun SalesmanSeatCard(
           if (p.canPrintInvoices) add("Print/PDF")
           if (p.canManageStock) add("Stock & Purchase")
           else if (p.canViewStock) add("View Stock")
-          if (p.canManageParties) add("Manage Khata")
+          if (p.canManageParties) add("Manage Ledger")
           else if (p.canViewParties) add("View Parties")
           if (p.canManageExpenses) add("Manage Expenses")
           else if (p.canViewExpenses) add("View Cashbook")
@@ -764,7 +764,7 @@ private fun SalesmanSeatEditorDialog(
         )
 
         PermissionToggleRow(
-          title = "Parties: View Customer & Supplier Khata",
+          title = "Ledger: View Customer & Supplier Ledger",
           subtitle = "View party directory and outstanding balances",
           checked = perms.canViewParties,
           tag = "perm_view_parties",
@@ -777,8 +777,8 @@ private fun SalesmanSeatEditorDialog(
           },
         )
         PermissionToggleRow(
-          title = "Parties: Add Party & Settle Khata Dues",
-          subtitle = "Add/edit customers & suppliers and record Khata payments",
+          title = "Ledger: Add Party & Settle Dues",
+          subtitle = "Add/edit customers & suppliers and record Party Ledger payments",
           checked = perms.canManageParties,
           tag = "perm_manage_parties",
           onCheckedChange = { checked ->

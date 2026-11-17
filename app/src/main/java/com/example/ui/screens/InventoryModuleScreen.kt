@@ -45,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,7 +113,8 @@ fun InventoryModuleContent(
   onDismissAddItemDialog: () -> Unit,
   onOpenAddItemDialog: () -> Unit,
   canManageStock: Boolean = true,
-  businessName: String = "Book",
+  businessName: String = "Finboss Billing No.1 ERP",
+  purchaseTriggerNonce: Int = 0,
 ) {
   val context = LocalContext.current
   var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -120,6 +122,12 @@ fun InventoryModuleContent(
   var editingItem by remember { mutableStateOf<InventoryItem?>(null) }
   var adjustItem by remember { mutableStateOf<InventoryItem?>(null) }
   var showAddPurchaseDialog by remember { mutableStateOf(false) }
+
+  LaunchedEffect(purchaseTriggerNonce) {
+    if (purchaseTriggerNonce > 0 && canManageStock) {
+      showAddPurchaseDialog = true
+    }
+  }
 
   val items = (inventoryState as? UiState.Success)?.data.orEmpty()
   val totalValuation = remember(items) { items.sumOf { it.stockValuation } }

@@ -109,7 +109,7 @@ fun ExpensesModuleContent(
   onDismissAddExpenseDialog: () -> Unit,
   onOpenAddExpenseDialog: () -> Unit,
   canManageExpenses: Boolean = true,
-  businessName: String = "Book",
+  businessName: String = "Finboss Billing No.1 ERP",
 ) {
   val context = LocalContext.current
   var viewMode by rememberSaveable { mutableStateOf("expenses") } // "expenses" or "cashbook"

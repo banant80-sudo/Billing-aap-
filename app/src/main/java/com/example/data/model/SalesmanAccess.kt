@@ -120,8 +120,8 @@ enum class SalesmanRolePreset(
     permissions = SalesmanPermissions.COUNTER_BILLING,
   ),
   FIELD_SALES(
-    label = "Field Sales & Khata",
-    description = "Create bills, manage parties & collect Khata payments",
+    label = "Field Sales & Ledger",
+    description = "Create bills, manage parties & collect Party Ledger payments",
     permissions = SalesmanPermissions.FIELD_SALES_KHATA,
   ),
   STORE_MANAGER(

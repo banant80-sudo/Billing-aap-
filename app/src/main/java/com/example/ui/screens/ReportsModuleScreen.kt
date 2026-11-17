@@ -24,8 +24,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -39,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,11 +93,18 @@ fun ReportsModuleContent(
   inventory: List<InventoryItem> = emptyList(),
   currency: String,
   onSwitchProfileClick: () -> Unit = {},
+  selectedSection: ReportPageSection = ReportPageSection.PROFIT_LOSS,
+  navigationNonce: Int = 0,
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
+  var activeSection by rememberSaveable { mutableStateOf(selectedSection) }
   var period by rememberSaveable { mutableStateOf(LedgerPeriod.THIS_MONTH) }
   val isPlainNonGst = profile?.isPlainNonGst == true
+
+  LaunchedEffect(selectedSection, navigationNonce) {
+    activeSection = selectedSection
+  }
 
   val dateRange = remember(period) { LedgerAnalyticsEngine.resolveDateRange(period) }
 
@@ -231,7 +241,17 @@ fun ReportsModuleContent(
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     item {
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          items(ReportPageSection.entries) { sec ->
+            FilterChip(
+              selected = activeSection == sec,
+              onClick = { activeSection = sec },
+              label = { Text(sec.shortLabel) },
+              modifier = Modifier.testTag("reports_section_chip_${sec.key}"),
+            )
+          }
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           items(LedgerPeriod.entries) { p ->
             FilterChip(
@@ -243,14 +263,14 @@ fun ReportsModuleContent(
           }
         }
         Text(
-          text = dateRange.rangeLabel,
+          text = "${activeSection.title} • ${dateRange.rangeLabel}",
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
     }
 
-    if (isPlainNonGst) {
+    if (activeSection == ReportPageSection.GST_REPORT && isPlainNonGst) {
       item {
         Card(
           shape = MaterialTheme.shapes.large,
@@ -282,7 +302,7 @@ fun ReportsModuleContent(
           }
         }
       }
-    } else {
+    } else if (activeSection == ReportPageSection.GST_REPORT) {
       // GSTR-3B Hero Card
       item {
         Box(
@@ -430,8 +450,35 @@ fun ReportsModuleContent(
           }
         }
       }
+
+      // GSTR-2B Input Tax Credit Reconciliation Card
+      item {
+        val itcExpenses = remember(filteredExpenses) { filteredExpenses.filter { it.gstInputAmount > 0.0 } }
+        Card(
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("reports_gstr2b_itc_card"),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("GSTR-2B Purchase & Input ITC (${itcExpenses.size} Vouchers)", style = MaterialTheme.typography.titleMedium)
+            ReportMetricRow("Total Eligible Purchase Value", formatErpMoney(currency, itcExpenses.sumOf { it.amount }))
+            ReportMetricRow("Claimable GST Input Credit", formatErpMoney(currency, report.inputGstCredit))
+            if (itcExpenses.isNotEmpty()) {
+              HorizontalDivider()
+              itcExpenses.take(5).forEach { exp ->
+                ReportMetricRow(
+                  label = "${exp.partyName.ifBlank { exp.title }} (${exp.referenceNo.ifBlank { exp.category.uppercase() }})",
+                  value = "ITC ${formatErpMoney(currency, exp.gstInputAmount)}",
+                )
+              }
+            }
+          }
+        }
+      }
     }
 
+    if (activeSection == ReportPageSection.PROFIT_LOSS) {
     // Profit & Loss Summary
     item {
       Card(
@@ -560,6 +607,135 @@ fun ReportsModuleContent(
         }
       }
     }
+    }
+
+    if (activeSection == ReportPageSection.SALES_EXPENSE) {
+      item {
+        val paidSales = filteredInvoices.sumOf { it.paidAmount }
+        val unpaidSales = (filteredInvoices.sumOf { it.grandTotal } - paidSales).coerceAtLeast(0.0)
+        Card(
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("reports_sales_expense_card"),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+              Text("Sales & Expense Summary (${period.label})", style = MaterialTheme.typography.titleMedium)
+            }
+            ReportMetricRow("Total Billed Sales (${filteredInvoices.size} Bills)", formatErpMoney(currency, filteredInvoices.sumOf { it.grandTotal }))
+            ReportMetricRow("Collected Amount", formatErpMoney(currency, paidSales))
+            ReportMetricRow("Pending Receivables", formatErpMoney(currency, unpaidSales))
+            HorizontalDivider()
+            ReportMetricRow("Operating Expenses (${filteredExpenses.size} Bills)", formatErpMoney(currency, report.totalOperatingExpenses))
+            ReportMetricRow("Net Cash Surplus / Deficit", formatErpMoney(currency, paidSales - report.totalOperatingExpenses))
+          }
+        }
+      }
+
+      item {
+        val byCat =
+          remember(filteredExpenses) {
+            filteredExpenses.groupBy { it.category.ifBlank { ErpExpense.CAT_OTHER } }
+              .mapValues { (_, list) -> list.sumOf { it.amount } to list.size }
+              .entries.sortedByDescending { it.value.first }
+          }
+        Card(
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Expense Breakdown by Category", style = MaterialTheme.typography.titleMedium)
+            if (byCat.isEmpty()) {
+              Text(
+                text = "No expenses recorded in ${period.label.lowercase()} yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            } else {
+              byCat.forEach { (cat, pair) ->
+                val catLabel = ErpExpense.ALL_CATEGORIES.firstOrNull { it.first == cat }?.second ?: cat.uppercase()
+                ReportMetricRow("$catLabel (${pair.second})", formatErpMoney(currency, pair.first))
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (activeSection == ReportPageSection.STOCK_VALUATION) {
+      item {
+        val totalCostValue = remember(inventory) { inventory.sumOf { it.stockValuation } }
+        val totalSaleValue = remember(inventory) { inventory.sumOf { (it.stockQty * it.salePrice).coerceAtLeast(0.0) } }
+        val lowCount = remember(inventory) { inventory.count { it.isLowStock } }
+        val outCount = remember(inventory) { inventory.count { it.isOutOfStock } }
+        Card(
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth().testTag("reports_stock_valuation_card"),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Icon(Icons.Filled.Inventory2, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+              Text("Stock Valuation Overview (${inventory.size} SKUs)", style = MaterialTheme.typography.titleMedium)
+            }
+            ReportMetricRow("Total Stock Value (Purchase Cost)", formatErpMoney(currency, totalCostValue))
+            ReportMetricRow("Potential Retail Sale Value", formatErpMoney(currency, totalSaleValue))
+            ReportMetricRow("Estimated Unrealized Margin", formatErpMoney(currency, (totalSaleValue - totalCostValue).coerceAtLeast(0.0)))
+            HorizontalDivider()
+            ReportMetricRow("Low Stock SKUs Alert", "$lowCount SKUs")
+            ReportMetricRow("Out of Stock SKUs", "$outCount SKUs")
+          }
+        }
+      }
+
+      item {
+        val rankedStock = remember(inventory) { inventory.sortedByDescending { it.stockValuation } }
+        Card(
+          shape = MaterialTheme.shapes.medium,
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("SKU-Wise Closing Stock Value", style = MaterialTheme.typography.titleMedium)
+            if (rankedStock.isEmpty()) {
+              Text(
+                text = "No stock items in catalog yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            } else {
+              rankedStock.take(15).forEach { item ->
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                      text = "${item.stockQty.toInt()} ${item.unit} × Cost ${formatErpMoney(currency, item.purchasePrice)}",
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                  Text(
+                    text = formatErpMoney(currency, item.stockValuation),
+                    style = MonoMetricMedium,
+                    color = if (item.isOutOfStock) LossRedText else MaterialTheme.colorScheme.primary,
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     item {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -602,8 +778,8 @@ fun ReportsModuleContent(
                 type = "text/plain"
                 putExtra(
                   Intent.EXTRA_SUBJECT,
-                  if (isPlainNonGst) "Book Business P&L Summary (${period.label})"
-                  else "Book GST & P&L Report (${period.label})",
+                  if (isPlainNonGst) "Finboss Business P&L Summary (${period.label})"
+                  else "Finboss GST & P&L Report (${period.label})",
                 )
                 putExtra(Intent.EXTRA_TEXT, text)
               }
@@ -674,7 +850,7 @@ private fun buildShareableTaxReport(
   currency: String,
   isPlainNonGst: Boolean = false,
 ): String = buildString {
-  appendLine(profile?.businessName ?: "Book")
+  appendLine(profile?.businessName ?: "Finboss Billing No.1 ERP")
   if (!isPlainNonGst && !profile?.gstin.isNullOrBlank()) appendLine("GSTIN: ${profile?.gstin}")
   appendLine(
     if (isPlainNonGst) "Business P&L Summary (${period.label})"
@@ -691,5 +867,5 @@ private fun buildShareableTaxReport(
   appendLine("Net Revenue: ${formatErpMoney(currency, report.totalRevenue)}")
   appendLine("Operating Expenses: ${formatErpMoney(currency, report.totalOperatingExpenses)}")
   appendLine("Net Profit: ${formatErpMoney(currency, report.netProfit)}")
-  appendLine("_Shared via Book_")
+  appendLine("_Shared via Finboss Billing No.1 ERP_")
 }

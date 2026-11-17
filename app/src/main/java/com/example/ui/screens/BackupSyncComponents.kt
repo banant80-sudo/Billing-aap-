@@ -295,7 +295,7 @@ fun RestoreBackupConfirmDialog(
           style = MaterialTheme.typography.bodySmall,
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text("• Parties & Khata: ${payload.parties.size}", style = MaterialTheme.typography.bodyMedium)
+        Text("• Parties & Ledger: ${payload.parties.size}", style = MaterialTheme.typography.bodyMedium)
         Text("• Inventory SKUs: ${payload.inventory.size}", style = MaterialTheme.typography.bodyMedium)
         Text("• GST Invoices: ${payload.invoices.size}", style = MaterialTheme.typography.bodyMedium)
         Text("• Expenses: ${payload.expenses.size}", style = MaterialTheme.typography.bodyMedium)
