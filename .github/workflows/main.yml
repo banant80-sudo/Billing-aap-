@@ -24,7 +24,27 @@ jobs:
 
       - name: Restore Project Keystore & Print SHA-1
         run: |
-          base64 -d debug.keystore.base64 > debug.keystore
+          if [ -f "app/debug.keystore.base64" ]; then
+            echo "Decoding app/debug.keystore.base64..."
+            base64 -d app/debug.keystore.base64 > app/debug.keystore
+            cp app/debug.keystore debug.keystore
+          elif [ -f "debug.keystore.base64" ]; then
+            echo "Decoding root debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+            cp debug.keystore app/debug.keystore
+          else
+            echo "debug.keystore.base64 not found; generating fresh debug.keystore..."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            cp debug.keystore app/debug.keystore
+          fi
           rm -f my-upload-key.jks
           keytool -importkeystore \
             -srckeystore debug.keystore \
