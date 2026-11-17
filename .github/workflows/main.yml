@@ -22,11 +22,21 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Release Keystore & Print SHA-1
+      - name: Restore Project Keystore & Print SHA-1
         run: |
-          keytool -genkey -v -keystore release.keystore -storepass android123 -alias finbosskey -keypass android123 -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Finboss,O=RaghavEnterprises,C=IN"
-          keytool -list -v -keystore release.keystore -storepass android123 -alias finbosskey
-          cp release.keystore my-upload-key.jks
+          base64 -d debug.keystore.base64 > debug.keystore
+          rm -f my-upload-key.jks
+          keytool -importkeystore \
+            -srckeystore debug.keystore \
+            -srcstorepass android \
+            -srckeypass android \
+            -srcalias androiddebugkey \
+            -destkeystore my-upload-key.jks \
+            -deststorepass android \
+            -destkeypass android \
+            -destalias upload \
+            -noprompt
+          keytool -list -v -keystore my-upload-key.jks -storepass android -alias upload
           if ! grep -q "client_type\": 3" app/google-services.json 2>/dev/null; then
             mkdir -p app/src/main/res/values
             cat <<EOF > app/src/main/res/values/google_services_fix.xml
@@ -41,19 +51,29 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build Signed Release APK
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: android
+          KEY_PASSWORD: android
         run: |
-          gradle assembleRelease \
-            -Pandroid.injected.signing.store.file=$PWD/release.keystore \
-            -Pandroid.injected.signing.store.password=android123 \
-            -Pandroid.injected.signing.key.alias=finbosskey \
-            -Pandroid.injected.signing.key.password=android123
+          gradle assembleRelease
 
-      - name: Re-sign with v1, v2, v3 for ColorOS 13
+      - name: Align & Sign with v1, v2, v3 for All USB/Android Devices
         run: |
           BUILD_TOOLS=$(find $ANDROID_HOME/build-tools -maxdepth 1 | sort -V | tail -n 1)
           BUILT_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          $BUILD_TOOLS/zipalign -v -p 4 "$BUILT_APK" app-aligned.apk
-          $BUILD_TOOLS/apksigner sign --ks release.keystore --ks-pass pass:android123 --key-pass pass:android123 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out Finboss-Billing-Signed.apk app-aligned.apk
+          $BUILD_TOOLS/zipalign -f -v -p 4 "$BUILT_APK" app-aligned.apk
+          $BUILD_TOOLS/apksigner sign \
+            --ks my-upload-key.jks \
+            --ks-key-alias upload \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out Finboss-Billing-Signed.apk \
+            app-aligned.apk
+          $BUILD_TOOLS/apksigner verify --verbose Finboss-Billing-Signed.apk
 
       - name: Upload Signed APK Artifact
         uses: actions/upload-artifact@v4
@@ -64,8 +84,8 @@ jobs:
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0-latest
-          name: Finboss Billing App (Signed Release)
+          tag_name: v1.1-latest
+          name: Finboss Billing No.1 ERP (Signed Universal APK)
           files: Finboss-Billing-Signed.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
