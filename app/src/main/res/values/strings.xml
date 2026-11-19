@@ -32,4 +32,5 @@
     <string name="action_export_backup">Export Offline Backup (.json)</string>
     <string name="action_restore_backup">Restore from Backup (.json)</string>
     <string name="backup_section_title">Online Sync &amp; Offline Backup</string>
+    <string name="startup_unavailable">Finboss could not start. Reopen the app. If it still fails, contact support.</string>
 </resources>
