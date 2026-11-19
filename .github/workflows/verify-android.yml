@@ -61,8 +61,14 @@ jobs:
           sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -print | sort -V | tail -n 1)"
           test -x "$sdkmanager"
           "$sdkmanager" --install emulator platform-tools "$image"
-          "${sdkmanager%/*}/avdmanager" create avd --name finboss-smoke --package "$image" <<< no
+          export ANDROID_USER_HOME="$RUNNER_TEMP/finboss-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          "${sdkmanager%/*}/avdmanager" create avd --name finboss-smoke --package "$image" \
+            --path "$ANDROID_AVD_HOME/finboss-smoke.avd" <<< no
           export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          emulator -list-avds | grep -Fx finboss-smoke
 
           emulator -avd finboss-smoke -no-window -no-audio -no-snapshot \
             -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
