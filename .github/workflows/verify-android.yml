@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   verify-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -58,8 +58,11 @@ jobs:
           fi
 
           image='system-images;android-35;google_apis;x86_64'
-          sdkmanager --install emulator platform-tools "$image"
-          avdmanager create avd --name finboss-smoke --package "$image" <<< no
+          sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -print | sort -V | tail -n 1)"
+          test -x "$sdkmanager"
+          "$sdkmanager" --install emulator platform-tools "$image"
+          "${sdkmanager%/*}/avdmanager" create avd --name finboss-smoke --package "$image" <<< no
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
 
           emulator -avd finboss-smoke -no-window -no-audio -no-snapshot \
             -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
