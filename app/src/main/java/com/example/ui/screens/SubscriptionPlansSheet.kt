@@ -566,17 +566,8 @@ fun SubscriptionPlansSheet(
 
                         if (isOwnerSession) {
                             Button(
-                                onClick = {
-                                    checkoutTier = tier
-                                    checkoutCycle = selectedBillingCycle
-                                    utrInput = ""
-                                    cardNumberInput = ""
-                                    cardExpiryInput = ""
-                                    cardCvvInput = ""
-                                    cardHolderInput = ""
-                                    checkoutErrorMessage = null
-                                },
-                                enabled = !isCurrentTier && !isBusy,
+                                onClick = {},
+                                enabled = false,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 48.dp)
@@ -595,7 +586,7 @@ fun SubscriptionPlansSheet(
                                     text = if (isCurrentTier) {
                                         "Current Active Plan (${selectedBillingCycle.replaceFirstChar { it.uppercase() }})"
                                     } else {
-                                        "Subscribe to ${tier.displayName} (${inrFormatter.format(displayPrice)})"
+                                        "Verified checkout unavailable"
                                     },
                                     fontWeight = FontWeight.Bold
                                 )

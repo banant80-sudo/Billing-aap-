@@ -500,6 +500,9 @@ class ErpDashboardRepository(
     tier: com.example.data.model.SubscriptionTier,
     billingCycle: String,
   ): Result<Unit> {
+    if (tier != com.example.data.model.SubscriptionTier.TRIAL) {
+      return Result.failure(IllegalStateException("A verified payment provider must activate paid plans."))
+    }
     val uid = requireUserId()
     val userDocRef = db.collection("users").document(uid)
     val profilesColRef = userDocRef.collection("business_profiles")

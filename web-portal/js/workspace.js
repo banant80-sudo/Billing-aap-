@@ -6,11 +6,8 @@ import {
   updateDoc,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.14.0/firebase-firestore.js";
-import QRCode from "https://esm.sh/qrcode@1.5.4";
 import {
-  ADMIN_RECEIPT_EMAIL,
-  MERCHANT_BENEFICIARY_NAME,
-  MERCHANT_UPI_ID
+  ADMIN_RECEIPT_EMAIL
 } from "./firebase-config.js";
 import {
   db,
@@ -546,7 +543,7 @@ export function openSubscriptionModal() {
   const renderPlans = () => {
     openModal(`
       <h3>Finboss Billing No.1 ERP Subscription &amp; Plans</h3>
-      <p class="muted">30-Day Free Trial active for new workspaces. Zero bank account or IFSC numbers displayed.</p>
+      <p class="muted">New workspaces include a 30-day free trial. Paid checkout is unavailable until verified payments are connected.</p>
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button id="sub-cyc-m" class="btn ${cycle === "monthly" ? "btn-primary" : "btn-ghost"}">Monthly</button>
         <button id="sub-cyc-y" class="btn ${cycle === "yearly" ? "btn-primary" : "btn-ghost"}">Yearly (Save 10%-20%)</button>
@@ -562,7 +559,7 @@ export function openSubscriptionModal() {
               <div class="kpi-value mono">${inr(amt)}</div>
               <div class="muted">${cycle === "yearly" ? "per year" : "per month"} • ${p.maxProfiles} profile(s) • ${p.maxSalesmen} staff</div>
               <div class="muted">${p.eInvoice ? "Includes E-Invoice &amp; E-Way Bill" : "Standard Billing"}</div>
-              <button class="btn btn-primary" data-sub-tier="${t}">Subscribe (${inr(amt)})</button>
+              <button class="btn btn-primary" disabled>Paid checkout unavailable</button>
             </div>`;
           })
           .join("")}
@@ -572,63 +569,8 @@ export function openSubscriptionModal() {
     $("m-cancel").onclick = closeModal;
     $("sub-cyc-m").onclick = () => { cycle = "monthly"; renderPlans(); };
     $("sub-cyc-y").onclick = () => { cycle = "yearly"; renderPlans(); };
-    document.querySelectorAll("[data-sub-tier]").forEach((btn) => {
-      btn.onclick = () => openUpiCheckoutModal(btn.dataset.subTier, cycle);
-    });
   };
   renderPlans();
-}
-
-export async function openUpiCheckoutModal(tier, cycle) {
-  const spec = PLAN_SPECS[tier];
-  const amount = cycle === "yearly" ? spec.yearly : spec.monthly;
-  const upiUri = `upi://pay?pa=${encodeURIComponent(MERCHANT_UPI_ID)}&pn=${encodeURIComponent(MERCHANT_BENEFICIARY_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(`Finboss ${spec.name}`)}`;
-
-  openModal(`
-    <h3>Secure UPI Checkout • ${spec.name} (${cycle.toUpperCase()})</h3>
-    <div class="qr-checkout-box">
-      <canvas id="desktop-upi-qr" width="180" height="180"></canvas>
-      <div class="bold">Scan &amp; Pay ${inr(amount)} (Incl. 18% GST)</div>
-      <div class="muted">Merchant: ${escapeHtml(MERCHANT_BENEFICIARY_NAME)} • Verified UPI: <span class="mono">${escapeHtml(MERCHANT_UPI_ID)}</span></div>
-    </div>
-    <div class="form-field" style="margin-top:12px;">
-      <label>12-Digit UPI UTR / Transaction Reference *</label>
-      <input id="m-utr-input" class="input-text mono" maxlength="12" placeholder="e.g. 432198765432" />
-    </div>
-    <p id="m-err" class="error-box hidden"></p>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-confirm-pay" class="btn btn-primary">Verify &amp; Activate Plan</button>
-    </div>
-  `);
-
-  QRCode.toCanvas($("desktop-upi-qr"), upiUri, { width: 180, margin: 1 });
-  $("m-cancel").onclick = closeModal;
-  $("m-confirm-pay").onclick = async () => {
-    const utr = ($("m-utr-input").value || "").trim();
-    if (!/^[0-9]{12}$/.test(utr)) {
-      $("m-err").textContent = "Enter the exact 12-digit numeric UPI UTR reference.";
-      $("m-err").classList.remove("hidden");
-      return;
-    }
-    const days = cycle === "yearly" ? 365 : 30;
-    const expiresMs = Date.now() + days * 86400000;
-    await updateDoc(doc(db, "users", state.user.uid), {
-      planTier: tier,
-      billingCycle: cycle,
-      planExpiresAtMs: expiresMs,
-      planAmountPaid: amount,
-      updatedAt: serverTimestamp()
-    });
-    const toEmail = state.user.email || ADMIN_RECEIPT_EMAIL;
-    const subject = encodeURIComponent(`Congratulations! Your Finboss ${spec.name} Plan is Now Active`);
-    const body = encodeURIComponent(
-      `Congratulations! Your Finboss Billing No.1 ERP ${spec.name} (${cycle}) plan is now ACTIVE.\nAmount Paid: ₹${amount}\nUPI UTR: ${utr}\nMerchant: ${MERCHANT_BENEFICIARY_NAME} (${MERCHANT_UPI_ID})\nValid until: ${new Date(expiresMs).toDateString()}`
-    );
-    window.open(`mailto:${encodeURIComponent(toEmail)}?cc=${encodeURIComponent(ADMIN_RECEIPT_EMAIL)}&subject=${subject}&body=${body}`, "_blank");
-    closeModal();
-    showToast(`Congratulations! ${spec.name} Plan activated! Receipt emailed to ${toEmail}.`);
-  };
 }
 
 export function bindWorkspaceEvents() {

@@ -32,8 +32,7 @@ import {
 import {
   bindBillingTableEvents,
   openInvoiceModal,
-  renderBilling,
-  setBillingSubscriptionOpener
+  renderBilling
 } from "./billing.js";
 import {
   bindPartyTableEvents,
@@ -61,6 +60,8 @@ import {
   renderWorkspace
 } from "./workspace.js";
 import { bindAiCopilotEvents, renderAiCopilot } from "./ai-copilot.js";
+import { bindIncomeTaxSlabs } from "./income-tax-slabs.js";
+import { bindItrWorkingPaper } from "./itr-working-paper.js";
 import { bindGstFilingEvents, renderGstFiling } from "./gst-filing.js";
 
 function clearSubscriptions() {
@@ -279,12 +280,12 @@ state.renderCallback = renderAll;
 
 const TAB_TITLES = {
   overview: ["Executive Overview", "Real-time business performance across synced mobile & desktop devices"],
-  billing: ["Billing & GST Invoices", "Create, edit, print A4/Thermal PDFs, IRN E-Invoices & E-Way Bills"],
+  billing: ["Billing & GST Invoices", "Create and print invoices, and open the official e-invoice and e-way bill portals"],
   stock: ["Inventory & Stock", "Manage SKUs, Purchase Stock-In (+GST ITC), and low-stock alerts"],
   parties: ["Parties & Ledger", "Customer/Supplier Party Ledger, Item / Stock Ledger & Period P&L % analytics"],
   expenses: ["Expenses & Cashbook", "Track operating bills, pending payables, GST ITC & Cashbook flow"],
   reports: ["Reports & Analytics", "Profit & Loss, GSTR-1 / 2B / 3B, Sales & Expense and Stock Valuation"],
-  gst_filing: ["GST Filing Portal", "Generate GSTR-1 / GSTR-3B returns, download JSON & file via GST Portal API"],
+  gst_filing: ["GST & Banking", "Open the official GST Portal, review working papers and access bank payments"],
   ai: ["Finboss AI Copilot", "Ask AI Business Analyst, Voice-to-Invoice/Expense & Bill Photo OCR"],
   workspace: ["Workspace & Settings", "Switch GST/Plain Profiles, Salesman OTP Seats, App Settings & Backups"]
 };
@@ -490,7 +491,6 @@ $("modal-backdrop").onclick = (e) => {
 };
 
 // Wire modular table/feature event handlers
-setBillingSubscriptionOpener(openSubscriptionModal);
 bindBillingTableEvents();
 bindStockTableEvents();
 bindPartyTableEvents(openReceivePaymentModal);
@@ -498,6 +498,8 @@ bindExpenseEvents();
 bindWorkspaceEvents();
 bindAiCopilotEvents();
 bindGstFilingEvents();
+bindItrWorkingPaper();
+bindIncomeTaxSlabs();
 
 // Google Auth Controls
 $("google-signin-btn").onclick = async () => {

@@ -158,10 +158,10 @@ object WhatsAppShareHelper {
       appendLine("Grand Total: *${formatErpMoney(currency, invoice.grandTotal)}*")
       appendLine("Paid: ${formatErpMoney(currency, invoice.paidAmount)} • Due: ${formatErpMoney(currency, invoice.balanceDue)}")
       if (!isPlainNonGst && invoice.hasEInvoice) {
-        appendLine("E-Invoice IRN: ${invoice.irn}")
+        appendLine("Legacy IRN (verify on GST Portal): ${invoice.irn}")
       }
       if (!isPlainNonGst && invoice.hasEWayBill) {
-        appendLine("E-Way Bill: #${invoice.ewbNumber} (${invoice.distanceKm} KM)")
+        appendLine("Legacy E-Way Bill (verify on GST Portal): #${invoice.ewbNumber} (${invoice.distanceKm} KM)")
       }
       appendLine("_Shared via Finboss Billing No.1 ERP_")
     }

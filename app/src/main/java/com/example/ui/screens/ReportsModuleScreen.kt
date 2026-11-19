@@ -270,6 +270,10 @@ fun ReportsModuleContent(
       }
     }
 
+    if (activeSection == ReportPageSection.GST_REPORT) {
+      item { BankingPortalActions() }
+    }
+
     if (activeSection == ReportPageSection.GST_REPORT && isPlainNonGst) {
       item {
         Card(
@@ -324,7 +328,7 @@ fun ReportsModuleContent(
             ) {
               Surface(color = Color(0x3310B981), shape = RoundedCornerShape(50)) {
                 Text(
-                  text = "GSTR-3B SUMMARY • ${period.label.uppercase()}",
+                  text = "GSTR-3B WORKING PAPER • ${period.label.uppercase()}",
                   style = MaterialTheme.typography.labelSmall,
                   color = Color(0xFFA7F3D0),
                   modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -340,8 +344,8 @@ fun ReportsModuleContent(
             }
             Text(
               text =
-                if (report.netGstPayable > 0.0 || report.itcCarryForward == 0.0) "Net GST Payable"
-                else "Net ITC Credit Carry Forward",
+                if (report.netGstPayable > 0.0 || report.itcCarryForward == 0.0) "Unreconciled Book Tax Difference"
+                else "Unreconciled Book Credit Difference",
               style = MaterialTheme.typography.bodyMedium,
               color = Color(0xFFCBD5E1),
             )
@@ -461,9 +465,9 @@ fun ReportsModuleContent(
           modifier = Modifier.fillMaxWidth().testTag("reports_gstr2b_itc_card"),
         ) {
           Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("GSTR-2B Purchase & Input ITC (${itcExpenses.size} Vouchers)", style = MaterialTheme.typography.titleMedium)
+            Text("Purchase GST to Match With GSTR-2B (${itcExpenses.size} Vouchers)", style = MaterialTheme.typography.titleMedium)
             ReportMetricRow("Total Eligible Purchase Value", formatErpMoney(currency, itcExpenses.sumOf { it.amount }))
-            ReportMetricRow("Claimable GST Input Credit", formatErpMoney(currency, report.inputGstCredit))
+            ReportMetricRow("Recorded Expense GST to Reconcile", formatErpMoney(currency, report.inputGstCredit))
             if (itcExpenses.isNotEmpty()) {
               HorizontalDivider()
               itcExpenses.take(5).forEach { exp ->
@@ -860,8 +864,8 @@ private fun buildShareableTaxReport(
   if (!isPlainNonGst) {
     appendLine("Taxable Outward Sales: ${formatErpMoney(currency, report.taxableOutward)}")
     appendLine("Output GST: ${formatErpMoney(currency, report.outputGst)} (CGST ${formatErpMoney(currency, report.cgstTotal)}, SGST ${formatErpMoney(currency, report.sgstTotal)}, IGST ${formatErpMoney(currency, report.igstTotal)})")
-    appendLine("Input Tax Credit (ITC): ${formatErpMoney(currency, report.inputGstCredit)}")
-    appendLine("Net GST Payable: ${formatErpMoney(currency, report.netGstPayable)}")
+    appendLine("Recorded Expense GST to Reconcile: ${formatErpMoney(currency, report.inputGstCredit)}")
+    appendLine("Unreconciled Book Tax Difference: ${formatErpMoney(currency, report.netGstPayable)}")
     appendLine("------------------------------")
   }
   appendLine("Net Revenue: ${formatErpMoney(currency, report.totalRevenue)}")

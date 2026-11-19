@@ -189,7 +189,6 @@ export const state = {
   ledgerPeriod: "month",
   ledgerView: "parties",
   reportFocus: "all",
-  gstApiBaseUrl: localStorage.getItem("finboss_gst_api_url") || "",
   billingStatusFilter: "all",
   stockFilter: "all",
   partyTypeFilter: "all",

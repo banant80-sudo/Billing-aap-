@@ -1,0 +1,12 @@
+{
+  "2025": {
+    "source": "https://www.incometax.gov.in/iec/foportal/help/individual-business-profession",
+    "checkedOn": "2026-11-19",
+    "bands": [[400000,0],[800000,5],[1200000,10],[1600000,15],[2000000,20],[2400000,25],[null,30]]
+  },
+  "2026": {
+    "source": "https://www.incometaxindia.gov.in/documents/d/guest/income_tax_act_2025_as_amended_by_fa_act_2026-pdf",
+    "checkedOn": "2026-11-19",
+    "bands": [[400000,0],[800000,5],[1200000,10],[1600000,15],[2000000,20],[2400000,25],[null,30]]
+  }
+}

@@ -754,11 +754,6 @@ fun DashboardScreen(
                   canEditDeleteInvoices = effectivePermissions.canEditDeleteInvoices,
                   canPrintInvoices = effectivePermissions.canPrintInvoices,
                   canRecordPayments = effectivePermissions.canCreateInvoices || effectivePermissions.canEditDeleteInvoices,
-                  subscriptionStatus = subscriptionStatus,
-                  onSaveEInvoice = { inv, res -> viewModel.saveInvoiceEInvoice(inv, res) },
-                  onCancelEInvoice = { inv -> viewModel.cancelInvoiceEInvoice(inv) },
-                  onSaveEWayBill = { inv, res -> viewModel.saveInvoiceEWayBill(inv, res) },
-                  onOpenSubscriptionPlans = { showSubscriptionSheet = true },
                 )
               DashboardTab.STOCK ->
                 InventoryModuleContent(

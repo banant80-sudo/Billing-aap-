@@ -96,7 +96,7 @@
         </div>
 
         <button class="nav-item" data-tab="gst_filing">
-          <span class="nav-label-wrap"><span class="nav-dot"></span><span>GST Filing Portal</span></span>
+          <span class="nav-label-wrap"><span class="nav-dot"></span><span>GST &amp; Banking</span></span>
         </button>
 
         <div class="nav-divider"></div>
@@ -505,7 +505,7 @@
             <div id="rep-input-gst" class="kpi-value mono text-emerald">₹0</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Net GST Liability</div>
+            <div class="kpi-label">Book Tax Difference (Unreconciled)</div>
             <div id="rep-net-gst" class="kpi-value mono text-amber">₹0</div>
           </div>
         </div>
@@ -559,92 +559,124 @@
         </div>
       </section>
 
-      <!-- TAB: GST FILING PORTAL -->
       <section id="tab-gst_filing" class="tab-panel">
-        <div class="gst-card">
-          <div class="card-header">
-            <div>
-              <h3>GST Return Filing &amp; Portal Connection (GSTR-1 / GSTR-3B)</h3>
-              <div class="muted">Live return data computed from your Finboss Billing No.1 ERP invoices &amp; purchase ITC</div>
+        <div class="gst-grid">
+          <div class="gst-card">
+            <h3>Income Tax Preparation <span class="pill pill-paid">Active</span></h3>
+            <p class="muted">Download your ITR working paper or check income tax slabs. To file, open the official e-Filing Portal.</p>
+            <div class="form-field">
+              <label for="itr-fy-start">Financial year start (e.g. 2025 for FY 2025–26)</label>
+              <input id="itr-fy-start" class="input-text" type="number" min="2000" step="1" />
             </div>
-            <span id="gst-filing-mode-badge" class="pill pill-info">GST Registered</span>
+            <button id="itr-working-paper" class="btn btn-primary" type="button">Download ITR Working Paper</button>
+            <p id="itr-working-paper-status" class="muted" role="status"></p>
+            <a class="btn btn-secondary" href="#income-tax-slabs">View Income Tax Slabs</a>
+            <a class="btn btn-secondary" href="https://www.incometax.gov.in/iec/foportal/" target="_blank" rel="noopener noreferrer">Open Income Tax Portal</a>
           </div>
-          <div class="form-grid">
-            <div class="form-field">
-              <label>Return Period (MMYYYY)</label>
-              <input id="gst-return-period" class="input-text mono" maxlength="6" placeholder="112026" />
-            </div>
-            <div class="form-field">
-              <label>Active Business GSTIN</label>
-              <input id="gst-filing-gstin" class="input-text mono" placeholder="27ABCDE1234F1Z5" />
-            </div>
-            <div class="form-field">
-              <label>GST Portal Username</label>
-              <input id="gst-portal-username" class="input-text" placeholder="portal_username" />
-            </div>
-            <div class="form-field">
-              <label>Registered Email</label>
-              <input id="gst-portal-email" class="input-text" placeholder="owner@business.com" />
-            </div>
-            <div class="form-field span-2">
-              <label>GST API Server URL (Firebase Hosting / Cloud Function Origin)</label>
-              <input id="gst-api-base-url" class="input-text mono" placeholder="https://gen-lang-client-0249346990.web.app" />
-            </div>
-            <div class="form-field">
-              <label>Portal OTP (for GSP Session Verification)</label>
-              <input id="gst-portal-otp" class="input-text mono" maxlength="8" placeholder="Enter 6-digit OTP" />
-            </div>
-            <div class="form-field" style="align-content:end;">
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button id="gst-request-otp-btn" class="btn btn-secondary">Request OTP</button>
-                <button id="gst-verify-otp-btn" class="btn btn-primary">Verify OTP</button>
+          <div class="gst-card">
+            <h3>GST Filing in Finboss <span class="pill pill-info">Coming Soon</span></h3>
+            <p class="muted">Use the GST Portal and Finboss working papers below to prepare and file your return.</p>
+          </div>
+        </div>
+        <div id="income-tax-slabs" class="gst-card">
+          <h3>Income Tax Slabs · Default New Regime</h3>
+          <p class="muted">Individual ordinary taxable income. These are marginal rates before any rebate, surcharge or cess. Special-rate income can follow different rules.</p>
+          <label for="slabs-year">Financial year start</label>
+          <input id="slabs-year" class="input-text mono" type="number" min="2000" max="2099" />
+          <button id="slabs-refresh" class="btn btn-secondary" type="button">Refresh slabs</button>
+          <p id="slabs-status" class="muted" role="status"></p>
+          <table><thead><tr><th>Taxable income band</th><th>Rate</th></tr></thead><tbody id="slabs-rows"></tbody></table>
+          <a id="slabs-source" class="btn btn-secondary hidden" target="_blank" rel="noopener noreferrer">View government source</a>
+        </div>
+        <div class="gst-grid">
+          <div class="gst-card">
+            <h3>Government GST Portal</h3>
+            <p class="muted">Open the official portal to file returns, review GSTR-2B and create a PMT-06 challan.</p>
+            <ol>
+              <li>Open Services → Payments → Create Challan.</li>
+              <li>Enter the amounts under the correct tax heads. Select the mode shown for your challan.</li>
+              <li>For NEFT/RTGS, use the mandate from the GST Portal. For UPI or net banking, use the portal's payment screen.</li>
+              <li>After payment, check challan status, CIN and the Electronic Cash Ledger on the GST Portal.</li>
+            </ol>
+            <a class="btn btn-primary" href="https://www.gst.gov.in/" target="_blank" rel="noopener noreferrer">Open GST Portal</a>
+          </div>
+          <div class="gst-card">
+            <h3>Business Banking</h3>
+            <p class="muted">Make vendor transfers through your bank. For GST payments, start with the GST challan above.</p>
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="bank-method">Payment method</label>
+                <select id="bank-method" class="input-select">
+                  <option value="neft">NEFT</option><option value="rtgs">RTGS</option>
+                  <option value="upi">UPI</option><option value="netbanking">Net Banking</option>
+                </select>
+              </div>
+              <div class="form-field" id="bank-amount-field">
+                <label for="bank-amount">Amount (₹)</label>
+                <input id="bank-amount" class="input-text" inputmode="decimal" placeholder="0.00" />
+              </div>
+              <div class="form-field span-2 hidden" id="bank-upi-field">
+                <label for="bank-upi-id">Recipient UPI ID</label>
+                <input id="bank-upi-id" class="input-text" autocomplete="off" placeholder="name@bank" maxlength="255" />
               </div>
             </div>
+            <p id="bank-payment-note" class="muted" role="status"></p>
+            <a id="bank-upi-open" class="btn btn-primary hidden">Open UPI app</a>
+            <div class="toolbar toolbar-wrap" id="bank-links">
+              <a class="btn btn-secondary" href="https://onlinesbi.sbi.bank.in/" target="_blank" rel="noopener noreferrer">SBI Net Banking</a>
+              <a class="btn btn-secondary" href="https://bobibanking.bankofbaroda.bank.in/" target="_blank" rel="noopener noreferrer">Bank of Baroda</a>
+              <a class="btn btn-secondary" href="https://www.unionbankofindia.bank.in/en/details/internet-banking" target="_blank" rel="noopener noreferrer">Union Bank</a>
+            </div>
+            <p class="muted">Verify the beneficiary and complete payment in your bank or UPI app. Finboss does not receive the transfer result.</p>
           </div>
-          <div id="gst-portal-status" class="gst-status-banner hidden"></div>
         </div>
-
+        <div class="gst-card">
+          <h3>Prepare GSTR-1 without a paid API</h3>
+          <ol>
+            <li>Choose the return month and download the Finboss Sales Review CSV.</li>
+            <li>Review invoice dates, GSTIN, place of supply and HSN/SAC. Transfer the checked figures to the latest GST Returns Offline Tool template.</li>
+            <li>Generate the upload file using the official tool and complete filing on the GST Portal.</li>
+          </ol>
+          <a class="btn btn-secondary" href="https://www.gst.gov.in/download/returns" target="_blank" rel="noopener noreferrer">Get Official Returns Offline Tool</a>
+        </div>
+        <div class="gst-card">
+          <div class="card-header">
+            <h3>GST Working Papers</h3>
+            <span id="gst-filing-mode-badge" class="pill pill-info"></span>
+          </div>
+          <p class="muted">Review these internal figures against the official returns before filing. They do not calculate the amount due on a challan.</p>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="gst-return-period">Return month (MMYYYY)</label>
+              <input id="gst-return-period" class="input-text mono" maxlength="6" inputmode="numeric" placeholder="112026" />
+            </div>
+            <div class="form-field">
+              <label for="gst-filing-gstin">Business GSTIN</label>
+              <input id="gst-filing-gstin" class="input-text mono" readonly />
+            </div>
+          </div>
+          <p id="gst-portal-status" class="gst-status-banner hidden" role="status"></p>
+        </div>
         <div class="gst-grid">
           <div class="gst-card">
             <div class="card-header">
-              <div>
-                <h3>GSTR-1 (Outward Supplies)</h3>
-                <div id="gst-gstr1-meta" class="muted">0 B2B • 0 B2C • 0 HSN rows</div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button id="gst-dl-gstr1-btn" class="btn btn-ghost btn-sm">Download JSON</button>
-                <button id="gst-upload-gstr1-btn" class="btn btn-primary btn-sm">Upload GSTR-1</button>
+              <h3>GSTR-1 Sales Working Paper</h3>
+              <div class="toolbar toolbar-wrap">
+                <button id="gst-dl-sales-csv-btn" class="btn btn-primary btn-sm" disabled>Download Sales Review CSV</button>
+                <button id="gst-dl-gstr1-btn" class="btn btn-secondary btn-sm">Download Working Paper</button>
               </div>
             </div>
+            <div id="gst-gstr1-meta" class="muted"></div>
             <div id="gst-gstr1-kpis" class="report-summary-grid"></div>
             <pre id="gst-gstr1-preview" class="gst-json-preview"></pre>
           </div>
-
           <div class="gst-card">
             <div class="card-header">
-              <div>
-                <h3>GSTR-3B (Tax Liability &amp; ITC + EVC)</h3>
-                <div id="gst-gstr3b-meta" class="muted">Auto-reconciled Output GST vs Input ITC</div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button id="gst-dl-gstr3b-btn" class="btn btn-ghost btn-sm">Download JSON</button>
-                <button id="gst-save-gstr3b-btn" class="btn btn-secondary btn-sm">Save GSTR-3B</button>
-              </div>
+              <h3>GSTR-3B Tax Working Paper</h3>
+              <button id="gst-dl-gstr3b-btn" class="btn btn-secondary btn-sm">Download Working Paper</button>
             </div>
+            <p class="muted">Match purchase tax with GSTR-2B and review eligibility, reversals and tax heads before claiming ITC.</p>
             <div id="gst-gstr3b-kpis" class="report-summary-grid"></div>
-            <div class="form-grid" style="margin-top:12px;">
-              <div class="form-field">
-                <label>Authorized Signatory PAN</label>
-                <input id="gst-evc-pan" class="input-text mono" maxlength="10" placeholder="ABCDE1234F" />
-              </div>
-              <div class="form-field">
-                <label>EVC OTP</label>
-                <input id="gst-evc-otp" class="input-text mono" maxlength="8" placeholder="EVC OTP" />
-              </div>
-            </div>
-            <div style="display:flex;justify-content:flex-end;">
-              <button id="gst-file-evc-btn" class="btn btn-primary btn-sm">File GSTR-3B with EVC</button>
-            </div>
             <pre id="gst-gstr3b-preview" class="gst-json-preview"></pre>
           </div>
         </div>

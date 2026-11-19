@@ -69,15 +69,19 @@ object InvoicePdfPrinter {
       profile?.isPlainNonGst == true || invoice.resolvedProfileId() == BusinessProfile.SLOT_PLAIN_1
     val effectiveShowHsn = options.showHsn && !isPlainNonGst
 
+    // Legacy app versions generated these identifiers locally. Only a provider-verified
+    // response may be printed as an official GST document reference.
+    val invoiceForPrint = invoice.copy(irn = "", ewbNumber = "")
+
     if (options.paperSize.isThermal) {
-      return buildThermalRollPdf(invoice, profile, currency, options, isPlainNonGst, effectiveShowHsn)
+      return buildThermalRollPdf(invoiceForPrint, profile, currency, options, isPlainNonGst, effectiveShowHsn)
     }
 
     if (options.style == InvoicePrintStyle.THERMAL_POS) {
-      return buildThermalStripOnSheetPdf(invoice, profile, currency, options, isPlainNonGst, effectiveShowHsn)
+      return buildThermalStripOnSheetPdf(invoiceForPrint, profile, currency, options, isPlainNonGst, effectiveShowHsn)
     }
 
-    return buildScaledSheetPdf(invoice, profile, currency, options, isPlainNonGst, effectiveShowHsn)
+    return buildScaledSheetPdf(invoiceForPrint, profile, currency, options, isPlainNonGst, effectiveShowHsn)
   }
 
   private fun buildScaledSheetPdf(

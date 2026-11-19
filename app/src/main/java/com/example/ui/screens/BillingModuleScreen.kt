@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -80,10 +81,6 @@ import com.example.data.model.ErpParty
 import com.example.data.model.GstInvoice
 import com.example.data.model.InventoryItem
 import com.example.data.model.InvoiceLineItem
-import com.example.data.model.SubscriptionStatus
-import com.example.data.model.SubscriptionTier
-import com.example.data.reference.EInvoiceGenerationResult
-import com.example.data.reference.EWayBillGenerationResult
 import com.example.data.reference.IndiaStates
 import com.example.data.sync.ErpAppSettings
 import com.example.ui.theme.MonoMetricMedium
@@ -157,11 +154,6 @@ fun BillingModuleContent(
   canEditDeleteInvoices: Boolean = true,
   canPrintInvoices: Boolean = true,
   canRecordPayments: Boolean = true,
-  subscriptionStatus: SubscriptionStatus = SubscriptionStatus.fromProfile(profile),
-  onSaveEInvoice: (GstInvoice, EInvoiceGenerationResult) -> Unit = { _, _ -> },
-  onCancelEInvoice: (GstInvoice) -> Unit = {},
-  onSaveEWayBill: (GstInvoice, EWayBillGenerationResult) -> Unit = { _, _ -> },
-  onOpenSubscriptionPlans: () -> Unit = {},
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
@@ -174,29 +166,12 @@ fun BillingModuleContent(
   var invoicePendingPdfExport by remember { mutableStateOf<GstInvoice?>(null) }
   var pendingPdfOptions by remember { mutableStateOf(InvoicePrintOptions.fromSettings(appSettings)) }
   var pendingPrintOrPdfRequest by remember { mutableStateOf<Pair<GstInvoice, Boolean>?>(null) }
-  var invoiceForEInvoiceSheet by remember { mutableStateOf<GstInvoice?>(null) }
-  var invoiceForEWayBillSheet by remember { mutableStateOf<GstInvoice?>(null) }
-  var upgradeDialogFeature by remember { mutableStateOf<Pair<String, String>?>(null) }
-
-  val openEInvoiceFor: (GstInvoice) -> Unit = { inv ->
-    if (!subscriptionStatus.allowsEInvoiceAndEWayBill) {
-      upgradeDialogFeature =
-        "GST Portal E-Invoice (IRN & Signed QR)" to
-          "1-Click GST Portal E-Invoice (IRN) & Signed QR Code generation is available in the 30-Day Free Trial and Diamond Plan (₹700/mo or ₹6,720/yr with 20% Yearly Discount)."
-    } else {
-      invoiceForEInvoiceSheet = inv
-    }
+  val openPortal: (String) -> Unit = { url ->
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+      .onFailure { onNotifyMessage("No browser is available to open the official portal.") }
   }
-
-  val openEWayBillFor: (GstInvoice) -> Unit = { inv ->
-    if (!subscriptionStatus.allowsEInvoiceAndEWayBill) {
-      upgradeDialogFeature =
-        "GST E-Way Bill & Transport Module" to
-          "E-Way Bill generation with City/PIN Distance (KM), Vehicle No., and Transporter details is available in the 30-Day Free Trial and Diamond Plan (₹700/mo or ₹6,720/yr with 20% Yearly Discount)."
-    } else {
-      invoiceForEWayBillSheet = inv
-    }
-  }
+  val openEInvoiceFor = { openPortal("https://einvoice1.gst.gov.in/") }
+  val openEWayBillFor = { openPortal("https://ewaybillgst.gov.in/") }
 
   val downloadPdfLauncher =
     rememberLauncherForActivityResult(
@@ -398,8 +373,8 @@ fun BillingModuleContent(
               },
               onEdit = { editingInvoice = invoice },
               onDelete = { invoicePendingDelete = invoice },
-              onOpenEInvoice = { openEInvoiceFor(invoice) },
-              onOpenEWayBill = { openEWayBillFor(invoice) },
+              onOpenEInvoice = { openEInvoiceFor() },
+              onOpenEWayBill = { openEWayBillFor() },
             )
           }
         }
@@ -510,95 +485,8 @@ fun BillingModuleContent(
       onDelete = {
         invoicePendingDelete = liveSelected
       },
-      onOpenEInvoice = { openEInvoiceFor(liveSelected) },
-      onOpenEWayBill = { openEWayBillFor(liveSelected) },
-    )
-  }
-
-  val liveEInvoiceTarget =
-    invoiceForEInvoiceSheet?.let { current -> invoices.firstOrNull { it.id == current.id } ?: current }
-  if (liveEInvoiceTarget != null) {
-    GenerateEInvoiceSheet(
-      invoice = liveEInvoiceTarget,
-      sellerProfile = profile,
-      appSettings = appSettings,
-      onSaveEInvoice = { result ->
-        onSaveEInvoice(liveEInvoiceTarget, result)
-      },
-      onCancelEInvoice = {
-        onCancelEInvoice(liveEInvoiceTarget)
-      },
-      onOpenEWayBillGenerator = {
-        invoiceForEInvoiceSheet = null
-        openEWayBillFor(liveEInvoiceTarget)
-      },
-      onDismiss = { invoiceForEInvoiceSheet = null },
-    )
-  }
-
-  val liveEWayBillTarget =
-    invoiceForEWayBillSheet?.let { current -> invoices.firstOrNull { it.id == current.id } ?: current }
-  if (liveEWayBillTarget != null) {
-    GenerateEWayBillSheet(
-      invoice = liveEWayBillTarget,
-      sellerProfile = profile,
-      appSettings = appSettings,
-      onSaveEWayBill = { result ->
-        onSaveEWayBill(liveEWayBillTarget, result)
-      },
-      onDismiss = { invoiceForEWayBillSheet = null },
-    )
-  }
-
-  upgradeDialogFeature?.let { (featureTitle, featureDesc) ->
-    UpgradePlanRequiredDialog(
-      featureTitle = featureTitle,
-      featureDescription = featureDesc,
-      currentPlanLabel = subscriptionStatus.topBarBadgeText,
-      recommendedTier = SubscriptionTier.DIAMOND,
-      onViewPlans = {
-        upgradeDialogFeature = null
-        onOpenSubscriptionPlans()
-      },
-      onDismiss = { upgradeDialogFeature = null },
-    )
-  }
-
-  pendingPrintOrPdfRequest?.let { (targetInv, isPdf) ->
-    PrintOptionsPickerDialog(
-      invoiceNumber = targetInv.invoiceNumber,
-      isPdfExport = isPdf,
-      isPlainNonGst = isPlainNonGst,
-      defaultSettings = appSettings,
-      onConfirm = { chosenOptions ->
-        pendingPrintOrPdfRequest = null
-        if (isPdf) {
-          executeDownloadPdf(targetInv, chosenOptions)
-        } else {
-          executePrintInvoice(targetInv, chosenOptions)
-        }
-      },
-      onOpenAllSettings = {
-        pendingPrintOrPdfRequest = null
-        onOpenAppSettings()
-      },
-      onDismiss = { pendingPrintOrPdfRequest = null },
-    )
-  }
-
-  invoicePendingDelete?.let { targetToDelete ->
-    DeleteInvoiceConfirmDialog(
-      invoice = targetToDelete,
-      currency = currency,
-      isBusy = isBusy,
-      onConfirm = {
-        onDeleteInvoice(targetToDelete)
-        if (selectedInvoice?.id == targetToDelete.id) {
-          selectedInvoice = null
-        }
-        invoicePendingDelete = null
-      },
-      onDismiss = { invoicePendingDelete = null },
+      onOpenEInvoice = { openEInvoiceFor() },
+      onOpenEWayBill = { openEWayBillFor() },
     )
   }
 }
@@ -727,7 +615,7 @@ private fun InvoiceListCard(
                       modifier = Modifier.size(12.dp),
                     )
                     Text(
-                      text = "IRN Verified",
+                      text = "Legacy IRN · verify on portal",
                       style = MaterialTheme.typography.labelSmall,
                       color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -740,7 +628,7 @@ private fun InvoiceListCard(
                   shape = RoundedCornerShape(50),
                 ) {
                   Text(
-                    text = "EWB #${invoice.ewbNumber} (${invoice.distanceKm} KM)",
+                    text = "Legacy EWB #${invoice.ewbNumber} (${invoice.distanceKm} KM)",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -811,7 +699,7 @@ private fun InvoiceListCard(
           ) {
             Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text(if (invoice.hasEInvoice) "IRN ✓" else "E-Invoice")
+            Text("E-Invoice Portal")
           }
           TextButton(
             onClick = onOpenEWayBill,
@@ -819,7 +707,7 @@ private fun InvoiceListCard(
           ) {
             Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text(if (invoice.hasEWayBill) "EWB ✓" else "E-Way Bill")
+            Text("E-Way Bill Portal")
           }
         } else if (canEditDelete) {
           TextButton(
@@ -1526,7 +1414,7 @@ private fun InvoiceDetailSheet(
           ) {
             Icon(Icons.Filled.QrCode2, contentDescription = null, modifier = Modifier.size(17.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(if (invoice.hasEInvoice) "E-Invoice (IRN ✓)" else "Generate E-Invoice")
+            Text("E-Invoice Portal")
           }
           OutlinedButton(
             onClick = onOpenEWayBill,
@@ -1534,7 +1422,7 @@ private fun InvoiceDetailSheet(
           ) {
             Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(17.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text(if (invoice.hasEWayBill) "E-Way Bill (#${invoice.ewbNumber})" else "Generate E-Way Bill")
+            Text("E-Way Bill Portal")
           }
         }
         if (canEditDelete) {
@@ -1626,16 +1514,10 @@ private fun InvoiceDetailSheet(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            if (invoice.hasEInvoice) {
-              SignedQrCodeMatrixBox(
-                qrPayload = invoice.signedQrData.ifBlank { invoice.irn },
-                modifier = Modifier.size(72.dp),
-              )
-            }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
               if (invoice.hasEInvoice) {
                 Text(
-                  text = "E-Invoice Ack #${invoice.ackNo} • ${invoice.ackDate}",
+                  text = "Legacy acknowledgement #${invoice.ackNo} • ${invoice.ackDate}",
                   style = MaterialTheme.typography.labelLarge,
                   fontWeight = FontWeight.Bold,
                   color = MaterialTheme.colorScheme.primary,

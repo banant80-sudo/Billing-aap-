@@ -3,33 +3,23 @@ import {
   serverTimestamp,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.14.0/firebase-firestore.js";
-import QRCode from "https://esm.sh/qrcode@1.5.4";
 import { db, INDIA_STATES, state } from "./state.js";
 import {
   $,
   activeProfile,
   closeModal,
-  effectivePlanTier,
   escapeHtml,
-  estimateDistanceKm,
   findPartyPhone,
   fmtQty,
   inr,
   isPlainNonGst,
-  isValidGstin,
   loadAppSettings,
   numberToIndianWords,
   openModal,
   profileScoped,
-  sha256Hex,
   shareToWhatsApp,
   showToast
 } from "./utils.js";
-
-let openSubscriptionFn = () => {};
-export function setBillingSubscriptionOpener(fn) {
-  openSubscriptionFn = fn;
-}
 
 export function renderBilling() {
   const q = ($("invoice-search")?.value || "").trim().toLowerCase();
@@ -67,14 +57,8 @@ export function renderBilling() {
     ? invoices
         .map((inv) => {
           const bal = Math.max(0, Number(inv.grandTotal || 0) - Number(inv.paidAmount || 0));
-          const hasActiveIrn = Boolean(inv.irn && inv.einvoiceStatus !== "cancelled");
-          const comp = [
-            hasActiveIrn ? `<span class="pill pill-info">IRN ✓</span>` : "",
-            inv.einvoiceStatus === "cancelled" ? `<span class="pill pill-loss">IRN CANCELLED</span>` : "",
-            inv.ewbNumber ? `<span class="pill pill-paid">EWB ${escapeHtml(inv.ewbNumber)}</span>` : ""
-          ]
-            .filter(Boolean)
-            .join(" ");
+          const comp = inv.irn || inv.ewbNumber
+            ? '<span class="pill pill-info">Legacy GST references · verify on portal</span>' : "";
 
           const itemPreview = (inv.lineItems || [])
             .slice(0, 2)
@@ -103,9 +87,9 @@ export function renderBilling() {
               <button class="btn btn-sm btn-ghost" data-action="wa-inv" data-id="${escapeHtml(inv.id)}">WhatsApp</button>
               <button class="btn btn-sm btn-ghost" data-action="edit-inv" data-id="${escapeHtml(inv.id)}">Edit</button>
               ${bal > 0 ? `<button class="btn btn-sm btn-primary" data-action="mark-paid" data-id="${escapeHtml(inv.id)}">Mark Paid</button>` : ""}
-              ${!isPlainNonGst() && inv.taxMode !== "none" && !hasActiveIrn ? `<button class="btn btn-sm btn-secondary" data-action="einvoice" data-id="${escapeHtml(inv.id)}">E-Invoice</button>` : ""}
-              ${!isPlainNonGst() && hasActiveIrn ? `<button class="btn btn-sm btn-danger-soft" data-action="cancel-irn" data-id="${escapeHtml(inv.id)}">Cancel IRN</button>` : ""}
-              ${!isPlainNonGst() && inv.taxMode !== "none" && !inv.ewbNumber ? `<button class="btn btn-sm btn-secondary" data-action="eway" data-id="${escapeHtml(inv.id)}">E-Way Bill</button>` : ""}
+              ${!isPlainNonGst() && inv.taxMode !== "none" ? `
+                <a class="btn btn-sm btn-secondary" href="https://einvoice1.gst.gov.in/" target="_blank" rel="noopener noreferrer">E-Invoice Portal</a>
+                <a class="btn btn-sm btn-secondary" href="https://ewaybillgst.gov.in/" target="_blank" rel="noopener noreferrer">E-Way Bill Portal</a>` : ""}
               <button class="btn btn-sm btn-danger-soft" data-action="delete-inv" data-id="${escapeHtml(inv.id)}">Delete</button>
             </div>
           </td>
@@ -714,175 +698,6 @@ export function openInvoiceModal(existingInvoice = null, prefillDraft = null) {
   renderForm();
 }
 
-export async function generateEInvoiceForInvoice(inv) {
-  const tier = effectivePlanTier();
-  if (tier !== "trial" && tier !== "diamond") {
-    showToast("E-Invoice requires Diamond Plan or active 30-Day Trial.");
-    openSubscriptionFn();
-    return;
-  }
-  const prof = activeProfile();
-  const settings = loadAppSettings();
-  const sellerGstin = (prof.gstin || settings.gstPortalGstin || "").trim().toUpperCase();
-  const errors = [];
-  if (inv.taxMode === "none") errors.push("Plain Non-GST bills cannot generate E-Invoices.");
-  if (!sellerGstin || !isValidGstin(sellerGstin)) {
-    errors.push("Valid 15-char Seller GSTIN is required in Business Settings.");
-  }
-  if (!inv.partyGstin || !isValidGstin(inv.partyGstin)) {
-    errors.push("Valid 15-char Buyer GSTIN is required on the invoice.");
-  }
-  if (errors.length) {
-    openModal(`
-      <h3>E-Invoice Pre-Check (${escapeHtml(inv.invoiceNumber)})</h3>
-      <div class="error-box">${errors.map(escapeHtml).join("<br/>")}</div>
-      <div class="modal-actions"><button id="m-cancel" class="btn btn-primary">Close</button></div>
-    `);
-    $("m-cancel").onclick = closeModal;
-    return;
-  }
-
-  const fy = prof.fiscalYearLabel || "FY 2026-27";
-  const irn = await sha256Hex(`${sellerGstin}|${fy}|INV|${inv.invoiceNumber}`);
-  const ackNo = "1126" + irn.split("").map((c) => (/\d/.test(c) ? c : String(c.charCodeAt(0) % 10))).join("").slice(0, 11);
-  const ackDate = new Date().toISOString().slice(0, 19).replace("T", " ");
-  const signedQrData = `SellerGstin:${sellerGstin}|BuyerGstin:${inv.partyGstin}|DocNo:${inv.invoiceNumber}|TotInvVal:${Number(inv.grandTotal || 0).toFixed(2)}|Irn:${irn}|AckNo:${ackNo}`;
-
-  const docDate = new Date().toLocaleDateString("en-GB");
-  const nicJson = JSON.stringify(
-    {
-      Version: "1.1",
-      TranDtls: { TaxSch: "GST", SupTyp: "B2B", RegRev: "N", IgstOnIntra: "N" },
-      DocDtls: { Typ: "INV", No: inv.invoiceNumber, Dt: docDate },
-      SellerDtls: { Gstin: sellerGstin, LglNm: prof.businessName, Loc: prof.state || "India", Pin: Number(prof.pincode || 400001) },
-      BuyerDtls: { Gstin: inv.partyGstin, LglNm: inv.partyName, Loc: inv.partyState || "India", Pin: Number(inv.partyPincode || 400001) },
-      ValDtls: { AssVal: inv.subtotal, CgstVal: inv.taxMode === "cgst_sgst" ? inv.gstTotal / 2 : 0, SgstVal: inv.taxMode === "cgst_sgst" ? inv.gstTotal / 2 : 0, IgstVal: inv.taxMode === "igst" ? inv.gstTotal : 0, TotInvVal: inv.grandTotal }
-    },
-    null,
-    2
-  );
-
-  const batch = writeBatch(db);
-  batch.update(doc(db, "users", state.user.uid, "invoices", inv.id), {
-    irn,
-    ackNo,
-    ackDate,
-    signedQrData,
-    einvoiceStatus: "generated",
-    updatedAt: serverTimestamp()
-  });
-  await batch.commit();
-
-  openModal(`
-    <h3>E-Invoice IRN Generated</h3>
-    <div class="qr-checkout-box">
-      <canvas id="einvoice-qr-canvas" width="160" height="160"></canvas>
-      <div class="mono bold">Ack No: ${escapeHtml(ackNo)}</div>
-      <div class="muted mono" style="word-break:break-all;font-size:11px;">IRN: ${escapeHtml(irn)}</div>
-    </div>
-    <div class="modal-actions">
-      <button id="m-dl-nic" class="btn btn-secondary">Download NIC JSON</button>
-      <button id="m-cancel" class="btn btn-primary">Done</button>
-    </div>
-  `);
-  QRCode.toCanvas($("einvoice-qr-canvas"), signedQrData, { width: 160, margin: 1 });
-  $("m-cancel").onclick = closeModal;
-  $("m-dl-nic").onclick = () => {
-    const blob = new Blob([nicJson], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `NIC_EInvoice_${inv.invoiceNumber}.json`;
-    a.click();
-  };
-  showToast(`E-Invoice IRN generated for ${inv.invoiceNumber}!`);
-}
-
-export function openEWayModal(invoice) {
-  const tier = effectivePlanTier();
-  if (tier !== "trial" && tier !== "diamond") {
-    showToast("E-Way Bill requires Diamond Plan or active 30-Day Trial.");
-    openSubscriptionFn();
-    return;
-  }
-  const prof = activeProfile();
-  const settings = loadAppSettings();
-  const initFromCity = prof.state || settings.defaultDispatchCity || "Mumbai";
-  const initFromPin = prof.pincode || "400001";
-  const initToCity = invoice.partyState || "Pune";
-  const initToPin = invoice.partyPincode || "411001";
-  const estKm = estimateDistanceKm(initFromCity, initFromPin, initToCity, initToPin);
-
-  openModal(
-    `
-    <h3>Generate GST E-Way Bill • ${escapeHtml(invoice.invoiceNumber)}</h3>
-    <div class="form-grid">
-      <div class="form-field"><label>From City / Place *</label><input id="ew-from" class="input-text" value="${escapeHtml(initFromCity)}" /></div>
-      <div class="form-field"><label>From PIN Code *</label><input id="ew-from-pin" class="input-text mono" value="${escapeHtml(initFromPin)}" maxlength="6" /></div>
-      <div class="form-field"><label>To City / Place *</label><input id="ew-to" class="input-text" value="${escapeHtml(initToCity)}" /></div>
-      <div class="form-field"><label>To PIN Code *</label><input id="ew-to-pin" class="input-text mono" value="${escapeHtml(initToPin)}" maxlength="6" /></div>
-      <div class="form-field"><label>Transport Mode</label><select id="ew-mode" class="input-select">
-        <option value="road">Road</option><option value="rail">Rail</option><option value="air">Air</option><option value="ship">Ship</option>
-      </select></div>
-      <div class="form-field">
-        <label>Distance (KM) <button type="button" id="ew-auto-km" class="link-btn">Auto Estimate</button></label>
-        <input id="ew-km" type="number" class="input-text mono" value="${estKm}" min="1" max="4000" />
-      </div>
-      <div class="form-field"><label>Vehicle No.</label><input id="ew-veh" class="input-text mono" value="MH-12-AB-1234" /></div>
-      <div class="form-field"><label>Vehicle Type</label><select id="ew-vtype" class="input-select">
-        <option value="regular">Regular (200 KM/day)</option><option value="odc">ODC Over-Dimensional (20 KM/day)</option>
-      </select></div>
-      <div class="form-field"><label>Transporter Name</label><input id="ew-tr-name" class="input-text" value="${escapeHtml(settings.defaultTransporterName || "")}" /></div>
-      <div class="form-field"><label>Transporter ID / GSTIN</label><input id="ew-tr-id" class="input-text mono" value="${escapeHtml(settings.defaultTransporterId || "")}" maxlength="15" /></div>
-      <div class="form-field"><label>LR / Transporter Doc No.</label><input id="ew-doc-no" class="input-text" /></div>
-      <div class="form-field"><label>Transporter Doc Date</label><input id="ew-doc-date" class="input-text" value="${new Date().toLocaleDateString("en-GB")}" /></div>
-    </div>
-    <p id="m-err" class="error-box hidden"></p>
-    <div class="modal-actions">
-      <button id="m-cancel" class="btn btn-ghost">Cancel</button>
-      <button id="m-save" class="btn btn-primary">Generate E-Way Bill</button>
-    </div>
-    `,
-    720
-  );
-
-  $("m-cancel").onclick = closeModal;
-  $("ew-auto-km").onclick = () => {
-    $("ew-km").value = estimateDistanceKm($("ew-from").value, $("ew-from-pin").value, $("ew-to").value, $("ew-to-pin").value);
-  };
-  $("m-save").onclick = async () => {
-    const distanceKm = Math.min(4000, Math.max(1, Number($("ew-km").value || 100)));
-    const vtype = $("ew-vtype").value;
-    const kmPerDay = vtype === "odc" ? 20 : 200;
-    const validDays = Math.max(1, Math.ceil(distanceKm / kmPerDay));
-    const validUntilDate = new Date(Date.now() + validDays * 86400000);
-    const hash = await sha256Hex(`${invoice.invoiceNumber}|${$("ew-veh").value}|${$("ew-from-pin").value}|${$("ew-to-pin").value}|${distanceKm}`);
-    const ewbNumber = "18" + hash.split("").map((c) => (/\d/.test(c) ? c : String(c.charCodeAt(0) % 10))).join("").slice(0, 10);
-
-    const batch = writeBatch(db);
-    batch.update(doc(db, "users", state.user.uid, "invoices", invoice.id), {
-      ewbNumber,
-      ewbDate: new Date().toISOString().slice(0, 10),
-      ewbValidUntil: `${validDays}d • Until ${validUntilDate.toLocaleDateString("en-IN")}`,
-      transportMode: $("ew-mode").value,
-      distanceKm,
-      fromPlace: $("ew-from").value.trim().slice(0, 80),
-      fromPincode: $("ew-from-pin").value.trim().slice(0, 12),
-      toPlace: $("ew-to").value.trim().slice(0, 80),
-      toPincode: $("ew-to-pin").value.trim().slice(0, 12),
-      vehicleNumber: $("ew-veh").value.trim().toUpperCase().slice(0, 25),
-      vehicleType: vtype,
-      transporterName: $("ew-tr-name").value.trim().slice(0, 100),
-      transporterId: $("ew-tr-id").value.trim().toUpperCase().slice(0, 30),
-      transporterDocNo: $("ew-doc-no").value.trim().slice(0, 40),
-      transporterDocDate: $("ew-doc-date").value.trim().slice(0, 30),
-      updatedAt: serverTimestamp()
-    });
-    await batch.commit();
-    closeModal();
-    showToast(`E-Way Bill ${ewbNumber} (${validDays} day validity) generated!`);
-  };
-}
-
 export function openPrintInvoiceDialog(invoice) {
   const settings = loadAppSettings();
   if (!settings.askPrintOptionsBeforePrint) {
@@ -974,8 +789,6 @@ function renderAndPrintInvoice(invoice, opts) {
           <h3 style="margin:0;">${plain ? "BILL / CASH MEMO" : "TAX INVOICE"}</h3>
           <div class="mono bold">${escapeHtml(invoice.invoiceNumber)}</div>
           <div class="mono">${new Date(invoice.createdAt?.seconds ? invoice.createdAt.seconds * 1000 : Date.now()).toLocaleDateString("en-IN")}</div>
-          ${invoice.irn && invoice.einvoiceStatus !== "cancelled" ? `<div class="mono" style="font-size:9px;">IRN: ${escapeHtml(invoice.irn.slice(0, 24))}...</div>` : ""}
-          ${invoice.ewbNumber ? `<div class="mono">EWB: ${escapeHtml(invoice.ewbNumber)}</div>` : ""}
         </div>
       </div>
 
@@ -1037,8 +850,6 @@ export function bindBillingTableEvents() {
 
     if (action === "print-inv") return openPrintInvoiceDialog(inv);
     if (action === "edit-inv") return openInvoiceModal(inv);
-    if (action === "eway") return openEWayModal(inv);
-    if (action === "einvoice") return generateEInvoiceForInvoice(inv);
 
     if (action === "wa-inv") {
       const biz = activeProfile().businessName || "Finboss Billing No.1 ERP";
@@ -1054,8 +865,6 @@ export function bindBillingTableEvents() {
         lines,
         `Grand Total: *${inr(inv.grandTotal)}*`,
         `Paid: ${inr(inv.paidAmount)} • Due: ${inr(due)}`,
-        inv.irn && inv.einvoiceStatus !== "cancelled" ? `IRN: ${inv.irn}` : "",
-        inv.ewbNumber ? `E-Way Bill: #${inv.ewbNumber}` : "",
         `_Shared via Finboss Billing No.1 ERP_`
       ]
         .filter(Boolean)
@@ -1087,16 +896,6 @@ export function bindBillingTableEvents() {
       }
       await batch.commit();
       return showToast(`Marked ${inv.invoiceNumber} as PAID!`);
-    }
-
-    if (action === "cancel-irn") {
-      const batch = writeBatch(db);
-      batch.update(doc(db, "users", state.user.uid, "invoices", inv.id), {
-        einvoiceStatus: "cancelled",
-        updatedAt: serverTimestamp()
-      });
-      await batch.commit();
-      return showToast(`Cancelled E-Invoice IRN for ${inv.invoiceNumber}`);
     }
 
     if (action === "delete-inv") {
