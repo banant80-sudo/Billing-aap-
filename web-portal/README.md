@@ -3,6 +3,27 @@
 This folder contains the browser-based **Desktop Website** edition of Finboss Billing No.1 ERP.
 It connects directly to the exact same **Firebase Auth + Cloud Firestore** database (`gen-lang-client-0249346990` / database `ai-studio-android-finbosse-8c9fbc7b-98a3-412d-8ccf-3779b232a5b8`) as the Android APK, so invoices, stock, ledger parties, expenses, E-Invoice/E-Way Bills, and subscriptions sync live across desktop and mobile.
 
+## Firebase configuration
+
+Store the replacement Android API key as the GitHub Actions secret
+`FINBOSS_ANDROID_FIREBASE_API_KEY`. For a local Android build, set that
+environment variable and run `python3 scripts/configure_firebase.py android`
+from the repository root before running Gradle. The generated Android
+configuration is ignored by Git. GitHub publishes a release only when a
+maintainer manually requests it and selects the publish option.
+
+For the portal, configure `FINBOSS_WEB_FIREBASE_API_KEY` in the hosting build
+environment with the project's restricted Browser key. Run the following
+command before serving or deploying the portal:
+
+```bash
+python3 scripts/configure_firebase.py web
+```
+
+The generated browser module is ignored by Git and must be present in the
+deployed portal files. Firebase client keys remain readable by the Android
+or browser client. Restrict these keys to the Firebase APIs in use.
+
 ## Option 1: Run Immediately on Local Desktop Browser
 From the repository root:
 ```bash
