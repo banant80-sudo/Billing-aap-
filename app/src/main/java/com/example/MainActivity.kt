@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -75,6 +77,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -112,29 +115,37 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun FinbossAppNavigation(authOverride: FirebaseAuth? = null) {
   val appContext = LocalContext.current.applicationContext
-  var deps by remember { mutableStateOf<FinbossBootstrapDeps?>(null) }
+  var deps by remember(appContext, authOverride) { mutableStateOf<FinbossBootstrapDeps?>(null) }
+  var startupFailed by remember(appContext, authOverride) { mutableStateOf(false) }
 
   LaunchedEffect(appContext, authOverride) {
-    // Allow MainActivity's initial SurfaceSyncGroup frame to commit before initializing Firebase & disk caches.
+    // Let the loading indicator render before initializing Firebase and disk caches.
     withFrameNanos {}
-    deps =
-      withContext(Dispatchers.IO) {
-        val resolvedAuth = authOverride ?: Firebase.auth
-        val databaseId = appContext.getString(R.string.firestore_database_id)
-        val db = FirebaseFirestore.getInstance(databaseId)
-        configureFirestoreOfflinePersistence(db)
-        val syncPrefs = SyncPreferences(appContext).apply { warmup() }
-        val settingsStore = ErpSettingsStore(appContext).apply { warmup() }
-        FinbossBootstrapDeps(
-          auth = resolvedAuth,
-          db = db,
-          teamRepository = TeamRepository(db = db, auth = resolvedAuth),
-          syncTracker = SyncStatusTracker(),
-          syncPrefs = syncPrefs,
-          settingsStore = settingsStore,
-          appContext = appContext,
-        )
-      }
+    try {
+      deps =
+        withContext(Dispatchers.IO) {
+          val resolvedAuth = authOverride ?: Firebase.auth
+          val databaseId = appContext.getString(R.string.firestore_database_id)
+          val db = FirebaseFirestore.getInstance(databaseId)
+          configureFirestoreOfflinePersistence(db)
+          val syncPrefs = SyncPreferences(appContext).apply { warmup() }
+          val settingsStore = ErpSettingsStore(appContext).apply { warmup() }
+          FinbossBootstrapDeps(
+            auth = resolvedAuth,
+            db = db,
+            teamRepository = TeamRepository(db = db, auth = resolvedAuth),
+            syncTracker = SyncStatusTracker(),
+            syncPrefs = syncPrefs,
+            settingsStore = settingsStore,
+            appContext = appContext,
+          )
+        }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: RuntimeException) {
+      Log.e("FinbossStartup", "Unable to initialize the billing workspace", e)
+      startupFailed = true
+    }
   }
 
   val loadedDeps = deps
@@ -143,10 +154,19 @@ fun FinbossAppNavigation(authOverride: FirebaseAuth? = null) {
       modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
       contentAlignment = Alignment.Center,
     ) {
-      CircularProgressIndicator(
-        modifier = Modifier.size(36.dp),
-        color = MaterialTheme.colorScheme.primary,
-      )
+      if (startupFailed) {
+        Text(
+          text = stringResource(R.string.startup_unavailable),
+          modifier = Modifier.padding(24.dp),
+          textAlign = TextAlign.Center,
+          color = MaterialTheme.colorScheme.onBackground,
+        )
+      } else {
+        CircularProgressIndicator(
+          modifier = Modifier.size(36.dp),
+          color = MaterialTheme.colorScheme.primary,
+        )
+      }
     }
     return
   }
