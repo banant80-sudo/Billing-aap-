@@ -15,7 +15,7 @@ permissions:
 jobs:
   verify-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -48,3 +48,48 @@ jobs:
             echo "::error::Found a placeholder Google OAuth client ID in the APK"
             exit 1
           fi
+
+      - name: Launch the APK on an Android emulator
+        run: |
+          set -euo pipefail
+          if [[ ! -w /dev/kvm ]]; then
+            sudo chgrp "$(id -gn)" /dev/kvm
+            sudo chmod g+rw /dev/kvm
+          fi
+
+          image='system-images;android-35;google_apis;x86_64'
+          sdkmanager --install emulator platform-tools "$image"
+          avdmanager create avd --name finboss-smoke --package "$image" <<< no
+
+          emulator -avd finboss-smoke -no-window -no-audio -no-snapshot \
+            -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          if ! timeout 180 bash -c 'adb wait-for-device && until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'; then
+            tail -n 50 emulator.log
+            exit 1
+          fi
+
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell wm dismiss-keyguard
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          package=com.aistudio.finbosserp.vqmtxr
+          adb install "$apk"
+          adb logcat -c
+          adb shell am start -W -n "$package/com.example.MainActivity"
+
+          for attempt in {1..8}; do
+            if timeout 12 adb shell uiautomator dump /sdcard/finboss-window.xml >/dev/null 2>&1 &&
+              adb exec-out cat /sdcard/finboss-window.xml > finboss-window.xml &&
+              grep -q 'text="Owner (Google)"' finboss-window.xml &&
+              grep -q 'text="Salesman (OTP)"' finboss-window.xml &&
+              adb shell pidof "$package" >/dev/null; then
+              echo "Finboss reached the sign-in screen and stayed open."
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::Finboss did not reach the sign-in screen"
+          adb logcat -d -s AndroidRuntime:E FinbossStartup:E
+          exit 1
