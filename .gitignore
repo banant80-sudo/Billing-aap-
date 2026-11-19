@@ -17,4 +17,5 @@ local.properties
 .env
 debug.keystore
 *-debug.log
-
+/app/google-services.json
+/web-portal/js/firebase-runtime-config.js

@@ -1,5 +1,7 @@
+import { firebaseApiKey } from "./firebase-runtime-config.js";
+
 export const FIREBASE_WEB_CONFIG = {
-  apiKey: "AIzaSyAJzPHOCelCrm9NOQLQPXeVIre32HxYG6E",
+  apiKey: firebaseApiKey,
   authDomain: "gen-lang-client-0249346990.firebaseapp.com",
   projectId: "gen-lang-client-0249346990",
   storageBucket: "gen-lang-client-0249346990.firebasestorage.app",

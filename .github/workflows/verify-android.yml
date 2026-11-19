@@ -6,6 +6,7 @@ on:
     paths:
       - 'app/**'
       - 'gradle/**'
+      - 'scripts/configure_firebase.py'
       - '*.gradle.kts'
       - '.github/workflows/verify-android.yml'
 
@@ -18,6 +19,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Generate Android Firebase configuration
+        env:
+          FINBOSS_ANDROID_FIREBASE_API_KEY: ${{ secrets.FINBOSS_ANDROID_FIREBASE_API_KEY }}
+        run: python3 scripts/configure_firebase.py android
 
       - uses: actions/setup-java@v4
         with:
@@ -37,14 +43,16 @@ jobs:
         run: |
           set -euo pipefail
           build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          "$build_tools/aapt2" dump resources app/build/outputs/apk/debug/app-debug.apk > resources.txt
+          config_dump="$(mktemp)"
+          trap 'rm -f "$config_dump"' EXIT
+          "$build_tools/aapt2" dump resources app/build/outputs/apk/debug/app-debug.apk > "$config_dump"
           for resource in google_app_id google_api_key project_id default_web_client_id; do
-            grep -Eq "string/${resource}([[:space:]]|$)" resources.txt || {
+            grep -Eq "string/${resource}([[:space:]]|$)" "$config_dump" || {
               echo "::error::Missing Firebase APK resource: $resource"
               exit 1
             }
           done
-          if grep -q '000000000000-placeholder.apps.googleusercontent.com' resources.txt; then
+          if grep -q '000000000000-placeholder.apps.googleusercontent.com' "$config_dump"; then
             echo "::error::Found a placeholder Google OAuth client ID in the APK"
             exit 1
           fi
