@@ -12,6 +12,17 @@ from the repository root before running Gradle. The generated Android
 configuration is ignored by Git. GitHub publishes a release only when a
 maintainer manually requests it and selects the publish option.
 
+Android release signing uses a persistent keystore with the alias `upload`.
+Save its base64 data as `FINBOSS_RELEASE_KEYSTORE_BASE64` and its two
+passwords as `FINBOSS_RELEASE_KEYSTORE_PASSWORD` and
+`FINBOSS_RELEASE_KEY_PASSWORD` in GitHub Actions secrets. Register the
+keystore's SHA-1 for the Finboss Android app in Firebase before testing Google
+Sign-In. Keep the original signing key to update an existing installation.
+
+If Firebase supplies an updated Android configuration, its base64 JSON can be
+saved in `GOOGLE_SERVICES_JSON_BASE64`. The build uses its OAuth metadata
+and still uses the replacement API key from `FINBOSS_ANDROID_FIREBASE_API_KEY`.
+
 For the portal, configure `FINBOSS_WEB_FIREBASE_API_KEY` in the hosting build
 environment with the project's restricted Browser key. Run the following
 command before serving or deploying the portal:
