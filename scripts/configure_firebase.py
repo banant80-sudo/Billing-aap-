@@ -1,5 +1,6 @@
 """Generate untracked Firebase client configuration without printing key values."""
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -20,6 +21,39 @@ def read_key(env_name):
     return key
 
 
+def load_android_config(template_path):
+    config = json.loads(template_path.read_text(encoding="utf-8"))
+    client, = config["client"]
+    override = os.environ.get("GOOGLE_SERVICES_JSON_BASE64", "").strip()
+    if not override:
+        return config, client
+
+    try:
+        candidate = json.loads(base64.b64decode("".join(override.split()), validate=True))
+        project = candidate["project_info"]
+        expected_project = config["project_info"]
+        if any(project[field] != expected_project[field] for field in ("project_id", "project_number")):
+            raise ValueError
+        matching = [
+            entry for entry in candidate["client"]
+            if entry["client_info"] == client["client_info"]
+        ]
+        selected, = matching
+        if not any(
+            entry["client_type"] == 3 and entry["client_id"].endswith(".apps.googleusercontent.com")
+            for entry in selected["oauth_client"]
+        ):
+            raise ValueError
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise SystemExit(
+            "GOOGLE_SERVICES_JSON_BASE64 must be an Android Firebase configuration "
+            "for the existing Finboss app with a Google Sign-In OAuth client."
+        ) from None
+
+    candidate["client"] = [selected]
+    return candidate, selected
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("client", choices=["android", "web"])
@@ -29,8 +63,7 @@ def main():
     if args.client == "android":
         key = read_key("FINBOSS_ANDROID_FIREBASE_API_KEY")
         path = ROOT / "app" / "google-services.template.json"
-        config = json.loads(path.read_text(encoding="utf-8"))
-        client, = config["client"]
+        config, client = load_android_config(path)
         client["api_key"] = [{"current_key": key}]
         path.with_name("google-services.json").write_text(
             json.dumps(config, indent=2) + "\n", encoding="utf-8"
