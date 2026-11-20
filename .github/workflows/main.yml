@@ -17,7 +17,6 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     env:
-      KEYSTORE_PATH: ${{ runner.temp }}/finboss-upload.jks
       PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' }}
 
     steps:
@@ -38,6 +37,7 @@ jobs:
 
       - name: Prepare APK signing key
         env:
+          KEYSTORE_PATH: ${{ runner.temp }}/finboss-upload.jks
           RELEASE_KEYSTORE_BASE64: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEYSTORE_BASE64 || '' }}
           RELEASE_STORE_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEYSTORE_PASSWORD || '' }}
           RELEASE_KEY_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEY_PASSWORD || '' }}
@@ -61,6 +61,7 @@ jobs:
 
       - name: Build Signed Release APK
         env:
+          KEYSTORE_PATH: ${{ runner.temp }}/finboss-upload.jks
           STORE_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEYSTORE_PASSWORD || 'android' }}
           KEY_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEY_PASSWORD || 'android' }}
         run: |
@@ -68,6 +69,7 @@ jobs:
 
       - name: Align and verify APK signatures
         env:
+          KEYSTORE_PATH: ${{ runner.temp }}/finboss-upload.jks
           STORE_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEYSTORE_PASSWORD || 'android' }}
           KEY_PASSWORD: ${{ env.PUBLISH_RELEASE == 'true' && secrets.FINBOSS_RELEASE_KEY_PASSWORD || 'android' }}
         run: |
