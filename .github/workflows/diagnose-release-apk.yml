@@ -1,0 +1,57 @@
+name: Finboss release clean install diagnostic
+
+on:
+  push:
+    branches: [diagnostics/finboss-apk-clean-install]
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Install the current signed release on a clean Android 13 emulator
+        run: |
+          set -euo pipefail
+          if [[ ! -w /dev/kvm ]]; then
+            sudo chgrp "$(id -gn)" /dev/kvm
+            sudo chmod g+rw /dev/kvm
+          fi
+
+          image='system-images;android-33;google_apis;x86_64'
+          sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -print | sort -V | tail -n 1)"
+          test -x "$sdkmanager"
+          "$sdkmanager" --install emulator platform-tools "$image"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/finboss-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          "${sdkmanager%/*}/avdmanager" create avd --name finboss-smoke --package "$image" \
+            --path "$ANDROID_AVD_HOME/finboss-smoke.avd" <<< no
+          export PATH="$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH"
+          emulator -list-avds | grep -Fx finboss-smoke
+
+          emulator -avd finboss-smoke -no-window -no-audio -no-snapshot \
+            -no-boot-anim -gpu swiftshader_indirect > emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          if ! timeout 180 bash -c 'adb wait-for-device && until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'; then
+            tail -n 50 emulator.log
+            exit 1
+          fi
+
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell wm dismiss-keyguard
+          apk="$RUNNER_TEMP/Finboss-Billing-Signed.apk"
+          curl -fLsS --retry 2 https://github.com/banant80-sudo/Billing-aap-/releases/download/v1.2-latest/Finboss-Billing-Signed.apk -o "$apk"
+          printf '%s  %s\n' 642ed000fcf13481669ba0b52abaa0200ed005b763b66b608fa3ee2c54209cd9 "$apk" | sha256sum --check
+          package=com.aistudio.finbosserp.vqmtxr
+          if adb shell pm list packages "$package" | grep -Fxq "package:$package"; then
+            echo "::error::The emulator already contains Finboss."
+            exit 1
+          fi
+          adb install "$apk"
+          adb shell pm path "$package" | grep -q '^package:'
+          echo "The exact GitHub v1.2 release installed on clean Android 13."
